@@ -1,0 +1,12 @@
+[SERIAL]
+port = tty0
+baudrate = 57600
+parity = none
+stopbits = 1
+timeout = 0
+
+[DATA]
+logdir = /var/log/dgslogger
+meterid = AT1X-TEST
+file_interval = 1d
+
