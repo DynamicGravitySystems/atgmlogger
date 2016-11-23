@@ -177,6 +177,48 @@ class SerialRecorder:
         self.log.info('Exiting dgslogger and shutting down logging')
         logging.shutdown()
 
+class SerialThread(threading.Thread):
+    kill = False
+
+    def __init__(self, port, name):
+        threading.Thread.__init__(self)
+        
+        #Initialize a logger for this thread
+        self._init_logger(self, port)
+
+    def _init_logger(self, port):
+        #Be careful that this doesn't cause duplicate/mismatched data
+        self.log = logging.getLogger(port)
+        self.log.setLevel(logging.info)
+        formatter = logging.Formatter(fmt='%(message)s')
+
+        handler = logging.handlers.TimedRotatingFileHandler(logfilename, when='midnight',
+                interval=1, backupCount=31)
+        handler.setLevel(logging.info)
+        handler.setFormatter(formatter)
+        self.log.addHandler(handler)
+        self.log.info("Initialized data logging stream from thread: {} on serial port: {}".format(self.name, self.port))
+
+
+    def _read_serial(self, ser):
+        to_read = ser.in_waiting
+        if to_read:
+            data = ser.read(to_read)
+            #Write serial data to log
+            self.log.info(data)
+        else:
+            return
+
+
+
+    def run(self):
+        while not kill:
+            self._read_serial(self, ser)
+
+    
+
+
+
 
 if __name__ == "__main__":
     recorder = SerialRecorder()

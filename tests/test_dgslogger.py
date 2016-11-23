@@ -1,6 +1,7 @@
 #!/usr/bin/python3.5
 
 import unittest
+from unittest.mock import patch
 import dgslogger
 import serial
 import os
@@ -20,6 +21,12 @@ class test_dgslogger(unittest.TestCase):
         pass
         with self.assertRaises(FileNotFoundError):
             self.logger.read_config('nonexistant.file')
+    
+    @patch(logging.getLogger)
+    def test_app_logging(self, mock_log):
+        """Test that the application is creating logs properly"""
+        pass
+
 
     def tearDown(self):
         pass
