@@ -62,8 +62,8 @@ class DGSRecorder:
                 ports = n_ports
                 #call the thread handler to create new threads
                 self.thread_handler()
-            
-            for t in self.threads:
+            #Remove dead threads 
+            for t in self.threads[:]:
                 if not t.is_alive():
                     self.threads.remove(t)
 
