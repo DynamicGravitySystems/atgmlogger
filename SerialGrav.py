@@ -9,6 +9,7 @@ import threading
 import os
 
 class Recorder:
+    max_threads = 4
     def __init__(self):
        self.threads = [] 
        self.exiting = threading.Event()
@@ -20,10 +21,11 @@ class Recorder:
         return [p.name for p in serial.tools.list_ports.comports()]
 
     def _make_thread(self, port):
-        thread = SerialRecorder(port, self.exiting)
-        return thread
+        return SerialRecorder(port, self.exiting)
 
     def spawn_threads(self):
+        if len(self.threads) > self.max_threads:
+            return 0
         to_spawn = [port for port in self._get_ports() if port not in [p.name for p in self.threads]]
         for port in to_spawn:
             thread = self._make_thread(port)
@@ -36,9 +38,27 @@ class Recorder:
                 self.threads.remove(t)
 
     def run(self):
+        """Main program loop - spawn threads and respawn them when dead
+        if the port is still available
+        """
+        print("Initializing run loop {}".format(__name__))
         while not self.exiting.is_set():
-            self.spawn_threads() 
-            time.sleep(.5)
+            try:
+                self.scrub_threads()
+                self.spawn_threads() 
+                time.sleep(.5)
+            except KeyboardInterrupt:
+                print(" Ctrl-C Captured - Exiting threads...\n")
+                self.exit()
+
+    def exit(self):
+        """Controlled exit, join threads and flush logs"""
+        self.exiting.set()
+        for t in (_ for _ in self.threads if _.is_alive()):
+            t.join()
+        #self.log.flush()
+        sys.exit(0)
+
 
 
 class SerialRecorder(threading.Thread):
@@ -83,3 +103,9 @@ class SerialRecorder(threading.Thread):
                 #self.exiting.set()
                 return
             
+if __name__ == "__main__":
+    recorder = Recorder()
+    recorder.run()
+    
+
+
