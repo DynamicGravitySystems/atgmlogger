@@ -7,6 +7,7 @@ import SerialGrav
 import threading
 import serial
 import time
+import logging
 
 """
 Skip a testcase with @unittest.skip('reason')
@@ -15,15 +16,16 @@ Assert exceptions using 'with' context:
         do something that raises
 """
 
+@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
 class test_Recorder(unittest.TestCase):
     def setUp(self):
-        self.recorder = SerialGrav.Recorder() 
+        self.recorder = SerialGrav.Recorder(loglevel = logging.CRITICAL) 
 
-    def test_instance(self):
+    def test_instance(self, cls_mock_serial):
         self.assertIsInstance(self.recorder, SerialGrav.Recorder)
 
     @patch('serial.tools.list_ports.comports')
-    def test_get_ports(self, mock_comports):
+    def test_get_ports(self, mock_comports, cls_mock_serial):
         #Mock up a ListPortInfo object to provide 'ttyS0' when comports() is called
         mock_port = mock.Mock()
         mock_port.name = 'ttyS0'
@@ -35,16 +37,16 @@ class test_Recorder(unittest.TestCase):
         self.assertEqual(ports, ['ttyS0'])
         mock_comports.assert_called_once_with()
 
-    def test_make_thread(self):
+    def test_make_thread(self, cls_mock_serial):
        thread = self.recorder._make_thread('ttyS0')
        self.assertIsInstance(thread, SerialGrav.SerialRecorder)
        self.assertEqual(thread.device, '/dev/ttyS0')
        self.assertEqual(thread.name, 'ttyS0')
        self.assertFalse(thread.is_alive())
     
-    @patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
+    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
     @patch('SerialGrav.Recorder._get_ports', return_value=['ttyS0', 'ttyS1'])
-    def test_spawn_threads(self, mock_ports, mock_serial):
+    def test_spawn_threads(self, mock_ports, cls_mock_serial):
        self.assertEqual(self.recorder._get_ports(), ['ttyS0', 'ttyS1'])
        self.assertEqual(self.recorder.threads, [])
 
@@ -58,9 +60,9 @@ class test_Recorder(unittest.TestCase):
        self.assertEqual(len(self.recorder.threads), 3)
        self.recorder.exiting.set()
 
-    @patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
-    def test_serial_read(self, mock_serial):
-        s = mock_serial.return_value
+    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
+    def test_serial_read(self, cls_mock_serial):
+        s = cls_mock_serial.return_value
         thread = self.recorder._make_thread('ttyS0')
         thread.start()
         s.write(b'test')
@@ -68,15 +70,17 @@ class test_Recorder(unittest.TestCase):
         time.sleep(.1)
         self.assertEqual(thread.data[0], 'test')
     
-    
-    @patch('SerialGrav.SerialRecorder.read_data', 
-                side_effect=serial.SerialException("Error Reading"))
-    def test_serial_read_exception(self, mock_read):
+    #@patch('SerialGrav.SerialRecorder.read_data', 
+    #            side_effect=serial.SerialException("Error Reading"))
+    @patch.object(SerialGrav.SerialRecorder, 'read_data', 
+            side_effect=serial.SerialException("mock error"))
+    def test_serial_read_exception(self, mock_read, cls_mock_serial):
         """Verify exception handling on bad read_data()
         Expect an exception to be added to thread.exc
         and the thread should be killed"""
 
-        thread = SerialGrav.SerialRecorder('ttyS0', threading.Event())
+        thread = SerialGrav.SerialRecorder('ttyS0', logging.getLogger(),
+               threading.Event())
         thread.start()
         #sleep required to allow thread to start before assertions
         time.sleep(.1)
@@ -84,9 +88,16 @@ class test_Recorder(unittest.TestCase):
         self.assertFalse(thread.exc is None)
         self.assertFalse(thread.is_alive())
 
-    @patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
+    def test_scrub_threads(self, cls_mock_serial):
+        """Test thread scrubbing function, ensure thread is removed if dead"""
+        self.assertFalse(self.recorder.threads)
+        
+
+
+    #This test should possibly be broken down more - refactor for integration testing
+    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
     @patch('SerialGrav.Recorder._get_ports', return_value=['ttyS0'])
-    def test_serial_exception_recovery(self, mock_ports, mock_serial):
+    def test_serial_exception_recovery(self, mock_ports, cls_mock_serial):
         """Test Recorder class to ensure thread is respawned
         after an exception is triggered.
         e.g. thread(/dev/ttyS0) -> exception -> returns
@@ -105,14 +116,24 @@ class test_Recorder(unittest.TestCase):
         self.assertFalse(self.recorder.threads[0].is_alive())
         #scrub_threads deletes dead threads from threads list
         self.recorder.scrub_threads()
-        self.assertEqual(len(self.recorder.threads), 0)
+        self.assertFalse(self.recorder.threads)
         self.recorder.spawn_threads() 
         time.sleep(1)
         self.assertEqual(len(self.recorder.threads), 1)
         self.assertEqual(self.recorder.threads[0].device, '/dev/ttyS0')
         self.assertTrue(self.recorder.threads[0].is_alive())
         self.recorder.exiting.set()
-        
+    
+    def test_app_logger(self, cls_mock_serial):
+        logger = self.recorder.log
+        self.assertIsInstance(logger, logging.Logger)
+        self.assertEqual(logger.name, 'SerialGrav')
+        self.assertEqual(logger.level, logging.CRITICAL)
+        with self.assertLogs(logger, logging.CRITICAL) as log:
+            logging.getLogger(logger.name).critical("test")
+        self.assertEqual(log.output, ['CRITICAL:SerialGrav:test'])
+        #test the file path for the handler - handler.baseFilename
+
 
     def tearDown(self):
         self.recorder.exiting.set()
@@ -123,17 +144,3 @@ class test_Recorder(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-
-
-
-
-
-"""Example working object patch: where testCall is a function in class
-    SerialGrav.SerialRecorder
-    @patch.object(SerialGrav.SerialRecorder, 'testCall')
-    def test_mock_obj(self, patch_obj):
-        patch_obj.return_value = 9
-        thread = SerialGrav.SerialRecorder('ttyS0', threading.Event())
-        val = thread.testCall()
-        print("Mocked value: {}".format(val))
-"""
