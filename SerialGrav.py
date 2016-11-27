@@ -11,18 +11,24 @@ import os
 
 class Recorder:
     max_threads = 4
-    def __init__(self, loglevel=logging.WARNING):
+    def __init__(self, loglevel=logging.DEBUG):
        self.threads = [] 
        self.data_loggers = {}
        self.exiting = threading.Event()
        self.log = None
        self.loglevel = loglevel
+       self.data_log_path = '/var/log/dgslogger'
        self._configure()
 
     def _configure(self):
         self.log = self._get_logger() 
-        self.log.info("debug from _configure method")
-
+        if not os.path.exists(self.data_log_path):
+            try:
+                os.makedirs(self.data_log_path)
+            except OSError:
+                self.log.exception('Error creating log directory {}'.format(
+                    self.data_log_path))
+        
     def _get_logger(self, debug=True):
         applogger = logging.getLogger(__name__)
         applogger.setLevel(self.loglevel)
@@ -49,7 +55,7 @@ class Recorder:
         trfh_handler = logging.handlers.TimedRotatingFileHandler(
                 './logs/SerialGrav.log', when='midnight', backupCount=15,
                 encoding='utf-8', delay=False, utc=False)
-        #trfh_handler.setLevel(logging.DEBUG)
+        # trfh_handler.setLevel(logging.DEBUG)
         trfh_handler.setFormatter(formatter)
 
         if debug:
@@ -61,21 +67,39 @@ class Recorder:
 
 
     def _get_data_logger(self, port):
+        # Check first to see if logger already init
         if port in self.data_loggers.keys(): 
             return self.data_loggers[port]
-        else:
-            data_logger = logging.getLogger(port)
-            data_logger.setLevel(self.loglevel)
-            #Data should be logged as message only
-            file_formatter = logging.Formatter("%(message)s") 
-            stream_formatter = logging.Formatter(
-                    "%(asctime)s - %(levelname)s - %(thread)d - %(message)s",
-                    datefmt = "%Y-%m-%d %H:%M:%S")
-            sh = logging.StreamHandler(sys.stdout)
-            sh.setFormatter(stream_formatter)
-            data_logger.addHandler(sh)
-            self.data_loggers[port] = data_logger
-            return data_logger
+        if logging.getLogger(port).hasHandlers():
+            self.data_loggers[port] = logging.getLogger(port)
+            return self.data_loggers[port]
+        # If not create a new logger for the tty port 
+        log_name = '.'.join([port, 'log'])
+        data_file = os.path.join(self.data_log_path, log_name)
+
+        data_logger = logging.getLogger(port)
+        data_logger.setLevel(logging.DEBUG)
+        # TODO: Determine what levels to use to diff data vs program debug - or to use parent logger for program debug info
+        # Create a stream handler and a timed rotating file handler
+        sh = logging.StreamHandler(sys.stdout) 
+        sh.setLevel(logging.WARNING)
+        trfh = logging.handlers.TimedRotatingFileHandler(
+                data_file, when='midnight', backupCount=32, encoding='utf-8',
+                delay=False, utc=False)
+        trfh.setLevel(logging.INFO)
+        stream_formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(thread)d - %(message)s",
+                datefmt = "%Y-%m-%d %H:%M:%S")
+        file_formatter = logging.Formatter("%(message)s") 
+        
+        sh.setFormatter(stream_formatter)
+        trfh.setFormatter(file_formatter)
+        
+        data_logger.addHandler(sh)
+        data_logger.addHandler(trfh)
+
+        self.data_loggers[port] = data_logger
+        return data_logger
 
     def _get_ports(self):
         return [p.name for p in serial.tools.list_ports.comports()]
@@ -117,7 +141,7 @@ class Recorder:
         self.exiting.set()
         for t in (_ for _ in self.threads if _.is_alive()):
             t.join()
-        #self.log.flush()
+        self.log.shutdown()
         sys.exit(0)
 
 
@@ -134,10 +158,14 @@ class SerialRecorder(threading.Thread):
         self.config = {'port' : self.device, 'timeout' : 1} 
         self.data = [] 
         self.log = logger
-        self.log.info("Thread {} initialized".format(self.name))
+        self.log.warning("Thread {} initialized".format(self.name))
         self.exiting.clear()
     
     def read_data(self, ser, encoding='utf-8'):
+        """Perform blocking readline() on serial stream 'ser'
+        then decode to a string and strip newline chars '\\n'
+        Returns: string
+        """
         return ser.readline().decode(encoding).rstrip('\n')
 
     def exit(self):
@@ -166,7 +194,7 @@ class SerialRecorder(threading.Thread):
                 line = self.read_data(ser)
                 if line is not '':
                     self.data.append(line)
-                    self.log.info(line)
+                    self.log.critical(line)
             except serial.SerialException:
                 self.exc = sys.exc_info() 
                 break 

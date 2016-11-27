@@ -44,7 +44,6 @@ class test_Recorder(unittest.TestCase):
        self.assertEqual(thread.name, 'ttyS0')
        self.assertFalse(thread.is_alive())
     
-    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
     @patch('SerialGrav.Recorder._get_ports', return_value=['ttyS0', 'ttyS1'])
     def test_spawn_threads(self, mock_ports, cls_mock_serial):
        self.assertEqual(self.recorder._get_ports(), ['ttyS0', 'ttyS1'])
@@ -60,7 +59,6 @@ class test_Recorder(unittest.TestCase):
        self.assertEqual(len(self.recorder.threads), 3)
        self.recorder.exiting.set()
 
-    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
     def test_serial_read(self, cls_mock_serial):
         s = cls_mock_serial.return_value
         thread = self.recorder._make_thread('ttyS0')
@@ -69,9 +67,24 @@ class test_Recorder(unittest.TestCase):
         #Sleep to ensure loop port has time to setup/send (may vary on diff system)
         time.sleep(.1)
         self.assertEqual(thread.data[0], 'test')
+        s.write('line1\nline2\n'.encode('utf-8'))
+        time.sleep(.1)
+        self.assertEqual(thread.data[1], 'line1')
+        self.assertEqual(thread.data[2], 'line2')
+
+    def test_data_logging(self, cls_mock_serial):
+        s = cls_mock_serial.return_value
+        thread = self.recorder._make_thread('ttyS0')
+        thread.start()
+        logger = thread.log
+        with self.assertLogs(logger, logging.DEBUG) as al:
+            logger.info("test")
+        self.assertEqual(al.output, ['INFO:{}:test'.format(logger.name)])
+
+
+
+
     
-    #@patch('SerialGrav.SerialRecorder.read_data', 
-    #            side_effect=serial.SerialException("Error Reading"))
     @patch.object(SerialGrav.SerialRecorder, 'read_data', 
             side_effect=serial.SerialException("mock error"))
     def test_serial_read_exception(self, mock_read, cls_mock_serial):
@@ -95,7 +108,6 @@ class test_Recorder(unittest.TestCase):
 
 
     #This test should possibly be broken down more - refactor for integration testing
-    #@patch('serial.Serial', return_value = serial.serial_for_url('loop://', timeout=0))
     @patch('SerialGrav.Recorder._get_ports', return_value=['ttyS0'])
     def test_serial_exception_recovery(self, mock_ports, cls_mock_serial):
         """Test Recorder class to ensure thread is respawned
@@ -133,7 +145,6 @@ class test_Recorder(unittest.TestCase):
             logging.getLogger(logger.name).critical("test")
         self.assertEqual(log.output, ['CRITICAL:SerialGrav:test'])
         #test the file path for the handler - handler.baseFilename
-
 
     def tearDown(self):
         self.recorder.exiting.set()
