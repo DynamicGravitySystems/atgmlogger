@@ -1,13 +1,24 @@
 #!/usr/bin/python3.5
 
-import serial
-import serial.tools.list_ports
+"""
+SerialGrav.py:
+
+"""
+
+import os
 import sys
 import time
 import logging
 import logging.handlers
 import threading
-import os
+
+import serial
+import serial.tools.list_ports
+
+__author__ = 'Zachery Brady'
+__copyright__ ='Copyright 2016, Dynamic Gravity Systems Inc.'
+__status__ = 'Development'
+__version__ = "0.1.0"
 
 class Recorder:
     max_threads = 4
@@ -31,14 +42,14 @@ class Recorder:
         
     def _get_logger(self, debug=True):
         applogger = logging.getLogger(__name__)
-        applogger.setLevel(self.loglevel)
+        applogger.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-                fmt="%(asctime)s - %(levelname)s - %(message)s",
-                datefmt="%Y-%m-%d %H:%M:%S")
+            fmt="%(asctime)s - %(levelname)s - %(module)s.%(funcName)s :: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S")
 
-        debug_handler = logging.StreamHandler(sys.stdout)
-        #debug_handler.setLevel(logging.DEBUG)
-        debug_handler.setFormatter(formatter)
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(self.loglevel)
+        stream_handler.setFormatter(formatter)
 
         #TODO: Replace this with instance var or from config file
         logpath = 'logs/SerialGrav.log'
@@ -49,22 +60,21 @@ class Recorder:
         if not os.path.exists(fullpath):
             try:
                 os.makedirs(fullpath)
-            except IOError as e:
+            except OSError as e:
                 print("Error creating log directory: {}".format(e))
 
         trfh_handler = logging.handlers.TimedRotatingFileHandler(
                 './logs/SerialGrav.log', when='midnight', backupCount=15,
                 encoding='utf-8', delay=False, utc=False)
-        # trfh_handler.setLevel(logging.DEBUG)
+        trfh_handler.setLevel(logging.DEBUG)
         trfh_handler.setFormatter(formatter)
 
         if debug:
-            applogger.addHandler(debug_handler)
+            applogger.addHandler(stream_handler)
         applogger.addHandler(trfh_handler)
 
         applogger.info("Application log initialized")
         return applogger
-
 
     def _get_data_logger(self, port):
         # Check first to see if logger already init
@@ -79,7 +89,6 @@ class Recorder:
 
         data_logger = logging.getLogger(port)
         data_logger.setLevel(logging.DEBUG)
-        # TODO: Determine what levels to use to diff data vs program debug - or to use parent logger for program debug info
         # Create a stream handler and a timed rotating file handler
         sh = logging.StreamHandler(sys.stdout) 
         sh.setLevel(logging.WARNING)
@@ -105,19 +114,22 @@ class Recorder:
         return [p.name for p in serial.tools.list_ports.comports()]
 
     def _make_thread(self, port):
-        data_logger = self._get_data_logger(port)
-        return SerialRecorder(port, data_logger, self.exiting)
+        self._get_data_logger(port)
+        return SerialRecorder(port, self.exiting)
 
     def spawn_threads(self):
+
         if len(self.threads) > self.max_threads:
             return 0
-        to_spawn = [port for port in self._get_ports() if port not in [p.name for p in self.threads]]
+        to_spawn = [port for port in self._get_ports() if port not in 
+                [p.name for p in self.threads]]
         for port in to_spawn:
             thread = self._make_thread(port)
             thread.start()
             self.threads.append(thread)
     
     def scrub_threads(self):
+
         for t in self.threads[:]:
             if not t.is_alive():
                 self.threads.remove(t)
@@ -126,13 +138,14 @@ class Recorder:
         """Main program loop - spawn threads and respawn them when dead
         if the port is still available
         """
-        print("Initializing run loop {}".format(__name__))
+        self.log.warning("Initializing Run Loop")
         while not self.exiting.is_set():
             try:
                 self.scrub_threads()
                 self.spawn_threads() 
                 time.sleep(.5)
             except KeyboardInterrupt:
+                self.log.warning("Ctrl-C captured - initiating exit")
                 print(" Ctrl-C Captured - Exiting threads...\n")
                 self.exit()
 
@@ -141,25 +154,27 @@ class Recorder:
         self.exiting.set()
         for t in (_ for _ in self.threads if _.is_alive()):
             t.join()
+        self.log.warning("Shutting down logging and application")
         self.log.shutdown()
         sys.exit(0)
 
-
 class SerialRecorder(threading.Thread):
-    def __init__(self, port, logger, signal):
+    def __init__(self, port, signal):
         threading.Thread.__init__(self)
-        #Retain port as name, self.device becomes device path e.g. /dev/ttyS0
+        # Retain port as name, self.device becomes device path e.g. /dev/ttyS0
         self.name = port
         self.device = os.path.join('/dev', port)
-        #exiting is global thread signal - setting will kill all threads
+        # exiting is global thread signal - setting will kill all threads
         self.exiting = signal
         self.kill = False
         self.exc = None
         self.config = {'port' : self.device, 'timeout' : 1} 
         self.data = [] 
-        self.log = logger
-        self.log.warning("Thread {} initialized".format(self.name))
-        self.exiting.clear()
+
+        self.data_log = logging.getLogger(port)
+        self.log = logging.getLogger(__name__)
+        self.log.info("Thread {} initialized".format(self.name))
+        # self.exiting.clear()
     
     def read_data(self, ser, encoding='utf-8'):
         """Perform blocking readline() on serial stream 'ser'
@@ -169,12 +184,12 @@ class SerialRecorder(threading.Thread):
         return ser.readline().decode(encoding).rstrip('\n')
 
     def exit(self):
-        self.log.info("Exiting thread %s", self.name)
+        self.log.warning("Exiting thread %s", self.name)
         self.kill = True
         return
 
     def run(self):
-        #TODO: Move this to Class DOCSTRING
+        # TODO: Move this to Class DOCSTRING
         """Creates a serial port from self.config dict then
         attempts to read from the port until the self.exiting
         event is triggered (set). If a timeout is not specified
@@ -194,7 +209,7 @@ class SerialRecorder(threading.Thread):
                 line = self.read_data(ser)
                 if line is not '':
                     self.data.append(line)
-                    self.log.critical(line)
+                    self.data_log.critical(line)
             except serial.SerialException:
                 self.exc = sys.exc_info() 
                 break 
@@ -204,5 +219,3 @@ if __name__ == "__main__":
     recorder = Recorder()
     recorder.run()
     
-
-

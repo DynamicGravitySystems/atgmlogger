@@ -76,14 +76,10 @@ class test_Recorder(unittest.TestCase):
         s = cls_mock_serial.return_value
         thread = self.recorder._make_thread('ttyS0')
         thread.start()
-        logger = thread.log
+        logger = thread.data_log
         with self.assertLogs(logger, logging.DEBUG) as al:
             logger.info("test")
         self.assertEqual(al.output, ['INFO:{}:test'.format(logger.name)])
-
-
-
-
     
     @patch.object(SerialGrav.SerialRecorder, 'read_data', 
             side_effect=serial.SerialException("mock error"))
@@ -92,8 +88,7 @@ class test_Recorder(unittest.TestCase):
         Expect an exception to be added to thread.exc
         and the thread should be killed"""
 
-        thread = SerialGrav.SerialRecorder('ttyS0', logging.getLogger(),
-               threading.Event())
+        thread = SerialGrav.SerialRecorder('ttyS0', threading.Event())
         thread.start()
         #sleep required to allow thread to start before assertions
         time.sleep(.1)
@@ -104,8 +99,6 @@ class test_Recorder(unittest.TestCase):
     def test_scrub_threads(self, cls_mock_serial):
         """Test thread scrubbing function, ensure thread is removed if dead"""
         self.assertFalse(self.recorder.threads)
-        
-
 
     #This test should possibly be broken down more - refactor for integration testing
     @patch('SerialGrav.Recorder._get_ports', return_value=['ttyS0'])
@@ -140,7 +133,7 @@ class test_Recorder(unittest.TestCase):
         logger = self.recorder.log
         self.assertIsInstance(logger, logging.Logger)
         self.assertEqual(logger.name, 'SerialGrav')
-        self.assertEqual(logger.level, logging.CRITICAL)
+        self.assertEqual(logger.level, logging.DEBUG)
         with self.assertLogs(logger, logging.CRITICAL) as log:
             logging.getLogger(logger.name).critical("test")
         self.assertEqual(log.output, ['CRITICAL:SerialGrav:test'])
