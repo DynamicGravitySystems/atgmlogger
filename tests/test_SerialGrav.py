@@ -1,13 +1,20 @@
 #!/usr/bin/python3.5
+"""
+dgslogger test suite for SerialGrav module
+"""
 
-import unittest
-from unittest.mock import patch
-from unittest import mock
-import SerialGrav
-import threading
-import serial
+
 import time
 import logging
+import unittest
+from unittest import mock
+from unittest.mock import patch
+import threading
+
+import serial
+
+import SerialGrav
+
 
 """
 Skip a testcase with @unittest.skip('reason')
