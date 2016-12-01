@@ -22,8 +22,10 @@ from SerialRecorder import SerialRecorder
 MAX_THREADS = 4
 EXIT_E = threading.Event()
 LOGLEVEL = logging.DEBUG
-LOG_PATH = '/var/log/dgslogger'
+LOG_DIR = '/var/log/dgslogger'
 LOG_NAME = __name__
+LOG_EXT = 'log'
+DATA_EXT = 'dat'
 DEBUG = True
 
 def debug_handler(stream=sys.stderr, level=logging.DEBUG):
@@ -35,39 +37,38 @@ def debug_handler(stream=sys.stderr, level=logging.DEBUG):
     debug_handler.setFormatter(debug_fmtr)
     return debug_handler
 
-def configure(path=LOG_PATH, retry=0, debug=False):
-    """Configure base program functions, logging and directories needed"""
-    global LOG_PATH
-    backup_path = os.path.abspath('./logs')
-    # Ensure or create logging directory
-    if not os.path.isdir(path):
-        logging.getLogger(LOG_NAME).error("%s is not a valid directory,\
-                attempting to init log in %s instead.", path, backup_path)
-        LOG_PATH = backup_path
-        configure(path=backup_path, retry=1)
-    if not os.path.exists(path):
-        try:
-            os.makedirs(path)
-        except OSError as err:
-            if err.errno == errno.EPERM:
-                print("Error - insufficient privileges to create logging directory {}"\
-                        .format(path))
-            if retry > 0:
-                # Prevent loop if unable to create dir in 1st or 2nd attempt
-                sys.exit(1)
-            LOG_PATH = backup_path
-            configure(path=backup_path, retry=1)
+def check_dirs(path=LOG_DIR):
+    """Check for existance and create log dirs if not present"""
+    if os.path.exists(path):
+        return True
 
-    # Initialize application log
-    log = logging.getLogger(LOG_NAME)
+    try:
+        os.makedirs(path)
+    except OSError as exc:
+        logger = logging.getLogger(LOG_NAME)
+        if exc.errno == errno.EPERM:
+            if DEBUG:
+                logger.error('Permission error attempting to create directory %s'\
+                        ' are you executing as root?', exc.filename)
+        raise exc
+        return False
+    else:
+        return True
+
+
+def get_applog(debug=False):
+    """Configure and return the application logger (for info/error logging)."""
+
+    app_log = logging.getLogger(LOG_NAME)
     if log.hasHandlers():
         return log
-    log.setLevel(LOGLEVEL)
+
+    app_log.setLevel(LOGLEVEL)
     formatter = logging.Formatter(
         fmt="%(asctime)s - %(levelname)s - %(module)s %(funcName)s :: %(message)s",
         datefmt="%y-%m-%d %H:%M:%S")
 
-    logfile = os.path.join(path, '.'.join([LOG_NAME, 'log']))
+    logfile = os.path.join(LOG_DIR, '.'.join([LOG_NAME, LOG_EXT]))
     rf_handler = logging.handlers.TimedRotatingFileHandler(
         logfile, when='midnight', backupCount=15, encoding='utf-8')
     rf_handler.setLevel(LOGLEVEL)
@@ -85,7 +86,7 @@ def get_portlog(port, header=False):
     if port_log.hasHandlers():
         return port_log
 
-    logfile = os.path.join(LOG_PATH, '.'.join([port, 'log']))
+    logfile = os.path.join(LOG_DIR, '.'.join([port, DATA_EXT]))
     log_format = logging.Formatter(fmt="%(message)s")
     trf_hdlr = logging.handlers.TimedRotatingFileHandler(logfile,
             when='midnight', backupCount=32, encoding='utf-8')
@@ -95,8 +96,9 @@ def get_portlog(port, header=False):
     port_log.addHandler(trf_hdlr)
     if DEBUG:
         port_log.addHandler(debug_handler())
+    if header:
+        port_log.info("Initialized Serial Port Log on port: %s", port)
     return port_log
-
 
 def get_ports(path=False):
     """Return a list of serial port names or full device path if path is True"""
@@ -110,11 +112,7 @@ def spawn_threads(thread_list):
     spawn_list = [port for port in get_ports()
                   if port not in [_.name for _ in thread_list]]
 
-    if len(thread_list) > MAX_THREADS:
-        # Reached concurrent thread limit
-        logging.getLogger(LOG_NAME).warning("Reached thread limit trying to create\
-                thread for port %s", ','.join(spawn_list))
-        return 0
+    # TODO add logic to limit threads to reasonable number
 
     for port in spawn_list:
         port_log = get_portlog(port)
@@ -122,6 +120,8 @@ def spawn_threads(thread_list):
         thread.start()
         thread_list.append(thread)
         logging.getLogger(LOG_NAME).info('Started new thread for port %s', thread.name)
+    # return list of ports spawned
+    return spawn_list
 
 def cull_threads(thread_list):
     """Check for dead threads and remove from thread_list"""
@@ -148,12 +148,11 @@ def run():
         try:
             spawn_threads(threads)
             cull_threads(threads)
-
             time.sleep(1)
         except KeyboardInterrupt:
             EXIT_E.set()
             join_threads(threads)
-            log.warning("KeyboardInterrupt detected - exiting dgslogger")
+            log.warning("KeyboardInterrupt captured - exiting dgslogger")
             sys.exit(0)
 
 if __name__ == "__main__":

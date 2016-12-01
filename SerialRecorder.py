@@ -1,7 +1,7 @@
 #!/usr/bin/python3.5
 
 """
-SerialGrav.py:
+SerialRecorder.py:
 
 """
 
