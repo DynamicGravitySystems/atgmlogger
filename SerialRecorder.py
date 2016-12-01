@@ -35,7 +35,8 @@ class SerialRecorder(threading.Thread):
         self.exiting = signal
         self.kill = False
         self.exc = None
-        self.config = {'port' : self.device, 'timeout' : 1}
+        self.config = {'port' : self.device, 'timeout' : 1, 'baudrate' : 57600
+                'stopbits' : serial.STOPBITS_ONE, 'parity' : serial.PARITY_NONE}
         self.data = []
 
         self.data_log = logging.getLogger(port)
