@@ -60,12 +60,12 @@ def get_applog(debug=False):
     """Configure and return the application logger (for info/error logging)."""
 
     app_log = logging.getLogger(LOG_NAME)
-    if log.hasHandlers():
-        return log
+    if app_log.hasHandlers():
+        return app_log
 
     app_log.setLevel(LOGLEVEL)
     formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(module)s %(funcName)s :: %(message)s",
+        fmt="%(asctime)s - %(levelname)s - %(module)s.%(funcName)s :: %(message)s",
         datefmt="%y-%m-%d %H:%M:%S")
 
     logfile = os.path.join(LOG_DIR, '.'.join([LOG_NAME, LOG_EXT]))
@@ -74,11 +74,11 @@ def get_applog(debug=False):
     rf_handler.setLevel(LOGLEVEL)
     rf_handler.setFormatter(formatter)
 
-    log.addHandler(rf_handler)
+    app_log.addHandler(rf_handler)
     if DEBUG:
         # Output to stream if debug enabled
-        log.addHandler(debug_handler())
-    return log
+        app_log.addHandler(debug_handler())
+    return app_log
 
 def get_portlog(port, header=False):
     """Configure log named for the specified port"""
@@ -141,7 +141,11 @@ def join_threads(thread_list):
 
 def run():
     """Main program run loop - creates and manages threads"""
-    log = configure(debug=True)
+    if not check_dirs():
+        logging.getLogger(LOG_NAME).critical("Logging directories cannot"\
+                " be created, are you running as root?")
+        sys.exit(1)
+    log = get_applog(debug=True)
     threads = []
     log.info("Starting DGSLogger main thread")
     while not EXIT_E.is_set():
