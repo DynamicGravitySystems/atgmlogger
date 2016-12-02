@@ -4,8 +4,7 @@ Unittest module for dgslogger.py execution
 """
 
 import unittest
-import unittest.mock
-from unittest.mock import patch, call
+from unittest.mock import patch, call, Mock
 import os
 import logging
 import itertools
@@ -61,16 +60,21 @@ class test_dgslogger(unittest.TestCase):
     def test_get_ports(self):
         """Verify serial.tools.list_ports.comports() returns as expected."""
         ports = main.get_ports()
-        self.assertEqual(ports[0], 'ttyS0')
         # comports imported into dgslogger with 'from' context
-        with patch('dgslogger.comports') as mock_ports:
+        with patch.object(main, 'comports') as mock_ports:
             ttyS1 = serial.tools.list_ports_linux.SysFS('ttyS1')
+            ttyS1.device = '/dev/ttyS1'
             ttyS2 = serial.tools.list_ports_linux.SysFS('ttyS2')
+            ttyS2.device = '/dev/ttyS2'
             mock_ports.return_value = [ttyS1, ttyS2]
             mocked = main.get_ports()
             mock_ports.assert_called_once_with()
             self.assertEqual(mocked[0], 'ttyS1')
             self.assertEqual(mocked[1], 'ttyS2')
+
+            mock_dev = main.get_ports(path=True)
+            self.assertEqual(mock_dev[0], '/dev/ttyS1')
+            self.assertEqual(mock_dev[1], '/dev/ttyS2')
 
     @patch.object(main, 'get_ports')
     @patch('dgslogger.SerialRecorder')
@@ -82,13 +86,21 @@ class test_dgslogger(unittest.TestCase):
 
         # Test with no active ports
         mock_ports.return_value = ['ttyS0', 'ttyS1']
-        main.spawn_threads([])
+        spawned = main.spawn_threads([])
+        self.assertEqual(spawned, mock_ports.return_value)
         def mock_calls(port=''):
             yield call(port, main.EXIT_E)
             yield call().start()
         calls = list(itertools.chain.from_iterable(mock_calls(p)
             for p in mock_ports.return_value))
         mock_ser.assert_has_calls(calls)
+
+        # Test with a port already active
+        mock_ports.return_value = ['ttyS0', 'ttyS1', 'ttyS2']
+        active_ports = [Mock(spec=SerialRecorder, name='ttyS0')]
+
+
+
 
     def test_cull_threads(self):
         """Verify that threads are removed correctly from list if dead"""
