@@ -24,6 +24,7 @@ EXIT_E = threading.Event()
 LOGLEVEL = logging.DEBUG
 LOG_DIR = '/var/log/dgslogger'
 LOG_NAME = __name__
+DATA_LOG_NAME = 'gravity_log'
 LOG_EXT = 'log'
 DATA_EXT = 'dat'
 DEBUG = True
@@ -74,19 +75,21 @@ def get_applog(debug=False):
     rf_handler.setLevel(LOGLEVEL)
     rf_handler.setFormatter(formatter)
 
+    # Handle exception here? for permission err
     app_log.addHandler(rf_handler)
     if DEBUG:
         # Output to stream if debug enabled
         app_log.addHandler(debug_handler())
     return app_log
 
-def get_portlog(port, header=False):
+# TODO: Change to return single data log
+def get_portlog(header=False):
     """Configure log named for the specified port"""
-    port_log = logging.getLogger(port)
+    port_log = logging.getLogger(DATA_LOG_NAME)
     if port_log.hasHandlers():
         return port_log
 
-    logfile = os.path.join(LOG_DIR, '.'.join([port, DATA_EXT]))
+    logfile = os.path.join(LOG_DIR, '.'.join([DATA_LOG_NAME, DATA_EXT]))
     log_format = logging.Formatter(fmt="%(message)s")
     trf_hdlr = logging.handlers.TimedRotatingFileHandler(logfile,
             when='midnight', backupCount=32, encoding='utf-8')
@@ -96,8 +99,9 @@ def get_portlog(port, header=False):
     port_log.addHandler(trf_hdlr)
     if DEBUG:
         port_log.addHandler(debug_handler())
+        port_log.info("Initialized data log in file: %s, debug ON", logfile)
     if header:
-        port_log.info("Initialized Serial Port Log on port: %s", port)
+        port_log.info("Initialized data log @ time")
     return port_log
 
 def get_ports(path=False):
@@ -116,7 +120,7 @@ def spawn_threads(thread_list):
 
     for port in spawn_list:
         port_log = get_portlog(port)
-        thread = SerialRecorder(port, EXIT_E)
+        thread = SerialRecorder(port, EXIT_E, DATA_LOG_NAME)
         thread.start()
         thread_list.append(thread)
         logging.getLogger(LOG_NAME).info('Started new thread for port %s', thread.name)

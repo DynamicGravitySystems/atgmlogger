@@ -20,13 +20,17 @@ __copyright__ = 'Copyright 2016, Dynamic Gravity Systems Inc.'
 __status__ = 'Development'
 __version__ = "0.1.0"
 
+
+# TODO: We can assume only one gravity meter will be recording at any one time
+# so make the data logs merge together so that in case of disconnect it will
+# not be spread across multiple files
 class SerialRecorder(threading.Thread):
     """
     Threaded serial recorder - binds to a serial port and records all text data
     port paramater expects the name of the device without directory info i.e.
     'ttyS0' not '/dev/ttyS0'
     """
-    def __init__(self, port, signal):
+    def __init__(self, port, signal, logname):
         threading.Thread.__init__(self)
         # Retain port as name, self.device becomes device path e.g. /dev/ttyS0
         self.name = port
@@ -39,7 +43,7 @@ class SerialRecorder(threading.Thread):
                 'stopbits' : serial.STOPBITS_ONE, 'parity' : serial.PARITY_NONE}
         self.data = []
 
-        self.data_log = logging.getLogger(port)
+        self.data_log = logging.getLogger(logname)
         self.log = logging.getLogger(self.name)
         self.log.info("Thread %s initialized", self.name)
         # self.exiting.clear()
@@ -50,7 +54,13 @@ class SerialRecorder(threading.Thread):
         then decode to a string and strip newline chars '\\n'
         Returns: string
         """
-        return ser.readline().decode(encoding).rstrip('\n')
+        raw = ser.readline()
+        try:
+            line = raw.decode(encoding).rstrip('\n')
+        except UnicodeDecodeError:
+            line = raw[1:].decode(encoding).rstrip('\n')
+        return line
+
 
     def exit(self):
         """Cleanly exit the thread, and log the event"""
@@ -85,6 +95,3 @@ class SerialRecorder(threading.Thread):
                 break
         self.exit()
 
-if __name__ == "__main__":
-    MAIN = Recorder()
-    MAIN.run()
