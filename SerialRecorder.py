@@ -48,23 +48,39 @@ class SerialRecorder(threading.Thread):
         self.log.info("Thread %s initialized", self.name)
         # self.exiting.clear()
 
-    # TODO: Fix this method (make port instance level?)
-    def read_data(self, ser, encoding='utf-8'):
+    def readline(self, encoding='utf-8'):
         """Perform blocking readline() on serial stream 'ser'
         then decode to a string and strip newline chars '\\n'
         Returns: string
         """
-        raw = ser.readline()
+        raw = self.socket.readline()
         try:
             line = raw.decode(encoding).rstrip('\n')
         except UnicodeDecodeError:
             line = raw[1:].decode(encoding).rstrip('\n')
         return line
 
+    def open_port(self):
+        """Open a serial connection assigned to self.socket, with the specified config"""
+        try:
+            self.socket = serial.Serial(**self.config)
+        except SerialException:
+            self.log.exception("Error opening serial port for reading")
+            self.exc = sys.exc_info()
+            # Re-raise the serial exception?
+            return False
+        else:
+            return True
+
+    def close_port(self):
+        """Close this instances serial port if it is open"""
+        if self.socket.is_open:
+            self.socket.close()
 
     def exit(self):
         """Cleanly exit the thread, and log the event"""
         self.log.warning("Exiting thread %s", self.name)
+        self.close_port()
         self.kill = True
         return
 
@@ -80,14 +96,18 @@ class SerialRecorder(threading.Thread):
         each item = a line of data.
         Logging will be added to log each line to a file concurrently.
         """
-        ser = serial.Serial(**self.config)
         self.log.debug("Started thread %s", self.name)
+        if not self.open_port():
+            self.log.warning("Error opening serial port for reading "\
+                    "- aborting thread")
+            self.exit()
         while not self.exiting.is_set():
             if self.kill:
                 break
             try:
-                line = self.read_data(ser)
+                line = self.readline()
                 if line is not '':
+                    # TODO: self.data should contain 'timestamp' : 'line' for future use
                     self.data.append(line)
                     self.data_log.critical(line)
             except serial.SerialException:

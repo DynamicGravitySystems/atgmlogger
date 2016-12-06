@@ -12,6 +12,7 @@ import os
 import sys
 import errno
 import time
+import configparser
 
 from serial.tools.list_ports import comports
 
@@ -42,7 +43,6 @@ def check_dirs(path=LOG_DIR):
     """Check for existance and create log dirs if not present"""
     if os.path.exists(path):
         return True
-
     try:
         os.makedirs(path)
     except OSError as exc:
@@ -56,6 +56,10 @@ def check_dirs(path=LOG_DIR):
     else:
         return True
 
+def read_config(path='./dgslogger'):
+    config = configparser.ConfigParser()
+    config.read_file(path)
+    return config
 
 def get_applog(debug=False):
     """Configure and return the application logger (for info/error logging)."""
@@ -82,7 +86,6 @@ def get_applog(debug=False):
         app_log.addHandler(debug_handler())
     return app_log
 
-# TODO: Change to return single data log
 def get_portlog(header=False):
     """Configure log named for the specified port"""
     port_log = logging.getLogger(DATA_LOG_NAME)
@@ -119,7 +122,6 @@ def spawn_threads(thread_list):
     # TODO add logic to limit threads to reasonable number
 
     for port in spawn_list:
-        port_log = get_portlog(port)
         thread = SerialRecorder(port, EXIT_E, DATA_LOG_NAME)
         thread.start()
         thread_list.append(thread)
@@ -145,6 +147,7 @@ def join_threads(thread_list):
 
 def run():
     """Main program run loop - creates and manages threads"""
+    config = read_config()
     if not check_dirs():
         logging.getLogger(LOG_NAME).critical("Logging directories cannot"\
                 " be created, are you running as root?")
