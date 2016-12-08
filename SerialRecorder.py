@@ -7,7 +7,6 @@ SerialRecorder.py:
 
 import os
 import sys
-import time
 import logging
 import logging.handlers
 import threading
@@ -32,21 +31,24 @@ class SerialRecorder(threading.Thread):
     """
     def __init__(self, port, signal, logname):
         threading.Thread.__init__(self)
-        # Retain port as name, self.device becomes device path e.g. /dev/ttyS0
         self.name = port
-        self.device = os.path.join('/dev', port)
         # exiting is global thread signal - setting will kill all threads
         self.exiting = signal
         self.kill = False
         self.exc = None
-        self.config = {'port' : self.device, 'timeout' : 1, 'baudrate' : 57600,
-                'stopbits' : serial.STOPBITS_ONE, 'parity' : serial.PARITY_NONE}
-        self.data = []
+        # TODO: config needs to be passed optionally from caller
+        self.config = {'port' : self._device_name(), 'timeout' : 1, 'baudrate' : 57600,
+                       'stopbits' : serial.STOPBITS_ONE, 'parity' : serial.PARITY_NONE}
+        self.data = [] # TODO: Evaluate removing this
 
         self.data_log = logging.getLogger(logname)
         self.log = logging.getLogger(self.name)
         self.log.info("Thread %s initialized", self.name)
         # self.exiting.clear()
+        self.socket = None
+
+    def _device_name(self):
+        return os.path.join('/dev', self.name)
 
     def readline(self, encoding='utf-8'):
         """Perform blocking readline() on serial stream 'ser'
@@ -64,7 +66,7 @@ class SerialRecorder(threading.Thread):
         """Open a serial connection assigned to self.socket, with the specified config"""
         try:
             self.socket = serial.Serial(**self.config)
-        except SerialException:
+        except serial.SerialException:
             self.log.exception("Error opening serial port for reading")
             self.exc = sys.exc_info()
             # Re-raise the serial exception?
@@ -114,4 +116,3 @@ class SerialRecorder(threading.Thread):
                 self.exc = sys.exc_info()
                 break
         self.exit()
-
