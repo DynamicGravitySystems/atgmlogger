@@ -122,6 +122,7 @@ class TestDGSLogger(unittest.TestCase):
         for _ in range(4):
             thread = Mock(spec=SerialRecorder)
             thread.is_alive.return_value = True
+            self.assertTrue(thread.is_alive())
             mock_thread_list.append(thread)
         main.join_threads(mock_thread_list)
         for thread in mock_thread_list:
@@ -135,6 +136,7 @@ class TestDGSLogger(unittest.TestCase):
         mock_thread_list = []
         dead_thread = Mock(spec=SerialRecorder)
         dead_thread.is_alive.return_value = False
+        self.assertFalse(dead_thread.is_alive())
         mock_thread_list.append(dead_thread)
         for _ in range(3):
             thread = Mock(spec=SerialRecorder)
@@ -153,7 +155,35 @@ class TestDGSLogger(unittest.TestCase):
     # Implemented in remote build on laptop - wait to merge
     def test_cull_threads(self):
         """Verify that threads are removed correctly from list if dead"""
-        pass
+        dead_th = SerialRecorder('ttyS0', None, main.DATA_LOG_NAME) 
+        live_th = SerialRecorder('ttyS1', None, main.DATA_LOG_NAME)
+
+        mock_false = Mock(return_value=False)
+        mock_true = Mock(return_value=True)
+        dead_th.is_alive = mock_false
+        live_th.is_alive = mock_true
+
+        self.assertFalse(dead_th.is_alive())
+        self.assertTrue(life_th.is_alive())
+
+        dead_thread = Mock(spec=SerialRecorder)
+        dead_thread.name.return_value = 'Th1'
+        dead_thread.is_alive.return_value = False
+        dead_thread.isAlive.return_value = False
+        live_thread = Mock(spec=SerialRecorder)
+        live_thread.name.return_value = 'Th2'
+        live_thread.is_alive.return_value = True
+        live_thread.isAlive.return_value = True
+        mock_thread_list = [dead_thread, live_thread]
+        with self.assertLogs(logger=main.LOG_NAME, level=logging.WARNING) as lm:
+            main.cull_threads(mock_thread_list)
+            print(lm.output)
+
+        self.assertTrue(dead_thread.is_alive.called)
+        self.assertEqual(len(mock_thread_list), 1)
+        self.assertListEqual(mock_thread_list, [live_thread])
+
+
 
 
     def test_read_config(self):
