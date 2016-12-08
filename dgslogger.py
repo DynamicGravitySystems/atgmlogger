@@ -16,9 +16,16 @@ import configparser
 
 from serial.tools.list_ports import comports
 
-from SerialRecorder import SerialRecorder
+try:
+    from SerialRecorder import SerialRecorder
+except ImportError:
+    from dgslogger.SerialRecorder import SerialRecorder
 
-# End Imports
+__author__ = 'Zachery Brady'
+__copyright__ = 'Copyright 2016, Dynamic Gravity Systems Inc.'
+__status__ = 'Development'
+__version__ = "0.1.0"
+
 
 MAX_THREADS = 4
 EXIT_E = threading.Event()
@@ -29,15 +36,25 @@ DATA_LOG_NAME = 'gravity_log'
 LOG_EXT = 'log'
 DATA_EXT = 'dat'
 DEBUG = True
+CONFIG_DEFAULTS = {'SERIAL' : {'port' : 'tty0',
+                               'buadrate': 57600,
+                               'parity' : 'none',
+                               'stopbits' : 1,
+                               'timeout' : 1},
+                   'DATA' : {'logdir' : '/var/log/dgslogger',
+                             'meterid' : 'AT1M-Test',
+                             'loginterval' : '1d'}
+                  }
 
 def debug_handler(stream=sys.stderr, level=logging.DEBUG):
-    debug_handler = logging.StreamHandler(stream)
-    debug_handler.setLevel(level)
+    """Return a log handler for debugging out to 'stream' e.g. sys.stderr"""
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(level)
     debug_fmtr = logging.Formatter(
         fmt="%(asctime)s - %(levelname)s - %(module)s.%(funcName)s :: %(message)s",
         datefmt="%y-%m-%d %H:%M:%S")
-    debug_handler.setFormatter(debug_fmtr)
-    return debug_handler
+    handler.setFormatter(debug_fmtr)
+    return handler
 
 def check_dirs(path=LOG_DIR):
     """Check for existance and create log dirs if not present"""
@@ -52,16 +69,22 @@ def check_dirs(path=LOG_DIR):
                 logger.error('Permission error attempting to create directory %s'\
                         ' are you executing as root?', exc.filename)
         raise exc
-        return False
     else:
         return True
 
 def read_config(path='./dgslogger'):
+    """Read program configuration from a file - or use sensible defaults if
+    file cannot be loaded
+    """
     config = configparser.ConfigParser()
-    config.read_file(path)
+    if not os.path.exists(path):
+        config.read_dict(CONFIG_DEFAULTS)
+        return config
+
+    config.read(path)
     return config
 
-def get_applog(debug=False):
+def get_applog():
     """Configure and return the application logger (for info/error logging)."""
 
     app_log = logging.getLogger(LOG_NAME)
@@ -94,8 +117,8 @@ def get_portlog(header=False):
 
     logfile = os.path.join(LOG_DIR, '.'.join([DATA_LOG_NAME, DATA_EXT]))
     log_format = logging.Formatter(fmt="%(message)s")
-    trf_hdlr = logging.handlers.TimedRotatingFileHandler(logfile,
-            when='midnight', backupCount=32, encoding='utf-8')
+    trf_hdlr = logging.handlers.TimedRotatingFileHandler(
+        logfile, when='midnight', backupCount=32, encoding='utf-8')
     trf_hdlr.setLevel(logging.CRITICAL)
     trf_hdlr.setFormatter(log_format)
 
@@ -114,13 +137,12 @@ def get_ports(path=False):
     return [_.name for _ in comports()]
 
 def spawn_threads(thread_list):
-    """Spawn a thread for each serial port available"""
+    """Spawn a thread for each serial port available
+    Returns: List of port names that were spawned
+    """
     # get a list of ports and check that they don't exist in THREADS
     spawn_list = [port for port in get_ports()
                   if port not in [_.name for _ in thread_list]]
-
-    # TODO add logic to limit threads to reasonable number
-
     for port in spawn_list:
         thread = SerialRecorder(port, EXIT_E, DATA_LOG_NAME)
         thread.start()
@@ -152,7 +174,7 @@ def run():
         logging.getLogger(LOG_NAME).critical("Logging directories cannot"\
                 " be created, are you running as root?")
         sys.exit(1)
-    log = get_applog(debug=True)
+    log = get_applog()
     threads = []
     log.info("Starting DGSLogger main thread")
     while not EXIT_E.is_set():
