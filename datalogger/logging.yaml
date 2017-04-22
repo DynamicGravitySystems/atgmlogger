@@ -1,0 +1,48 @@
+version: 1
+disable_existing_loggers: True
+formatters:
+  data_fmtr:
+      format: "%(message)s"
+  applog_fmtr:
+      format: "%(levelname)s:: %(asctime)s (%(funcName)s) - %(message)s"
+      datefmt: "%Y-%m-%d - %H:%M:%S"
+filters:
+  data_filter:
+    (): dgslogger.util.level_filter
+    level : 60
+
+handlers:
+  data_hdlr:
+    class : logging.handlers.TimedRotatingFileHandler
+    formatter : data_fmtr
+    filename: ./gravdata.dat
+    when: MIDNIGHT
+    interval: 1
+    backupCount: 30
+    encoding: utf-8
+    level: 60
+
+  debug_hdlr:
+    class: logging.StreamHandler
+    formatter: applog_fmtr
+    stream: ext://sys.stderr
+    level: DEBUG
+    filters: [data_filter]
+
+  file_hdlr:
+    class: logging.handlers.TimedRotatingFileHandler
+    formatter: applog_fmtr
+    filename: ./dgslogger.log
+#   filename: /var/log/dgslogger/dgslogger.log
+    when: MIDNIGHT
+    interval: 1
+    backupCount: 60
+    encoding: utf-8
+    level: INFO
+    filters: [data_filter]
+
+loggers:
+  dgslogger:
+    level: DEBUG
+    handlers: [data_hdlr, debug_hdlr, file_hdlr]
+    propogate: False

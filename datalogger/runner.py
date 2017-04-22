@@ -2,9 +2,12 @@
 
 import threading
 import time
+import os
 import logging
 import sys
+import pkg_resources
 
+import yaml
 import serial
 from serial.tools.list_ports import comports
 
@@ -72,6 +75,55 @@ def is_alive(thread: threading.Thread):
     return thread.is_alive()
 
 
+def check_config_paths(config_dict, fallback_path=None):
+    """Take a logging configuration dictionary and check handlers for filename
+    properties. If they have a filename then check that the path to file exists.
+    If the path doesn't exist, update the value to the fallback_path and return
+    the new dictionary."""
+    if fallback_path is None:
+        fallback_path = './logs'
+    # TODO: Investigate way to deep-copy dictionary as to not mutate the original
+    n_config_dict = config_dict.copy()
+    for handler, properties in config_dict.get('handlers').items():
+        prop_filename = properties.get('filename', None)
+        if prop_filename is None:
+            continue
+        base_path, filename = os.path.split(prop_filename)
+        if not os.path.exists(base_path):
+            n_config_dict['handlers'][handler]['filename'] = os.path.normpath(
+                os.path.join(fallback_path, filename)
+            )
+
+    return n_config_dict
+
+
+def configure_logging(conf_file=None):
+    """
+    Configure the logging for the application from a yaml file.
+    """
+    if conf_file is None:
+        conf_file = 'logging.yaml'
+
+    # Consider adding exception handling here, but to what end?
+    resource = pkg_resources.resource_stream(__package__, conf_file)
+    dict_conf = yaml.load(resource)
+
+    # Do some path checking on any 'filename' keys in dict_conf['handlers']
+    default_path = '/var/log/dgslogger'
+    make_default = True
+    # Iterate through dict_conf 'handlers' looking for
+    dict_conf = check_config_paths(dict_conf, default_path)
+
+    # Make the default sub-directory if required.
+    if make_default and not os.path.exists(default_path):
+        os.mkdir(default_path, mode=0o770)
+
+    # Execute logging configuration
+    logging.config.dictConfig(dict_conf)
+    # Return list of available loggers from the configuration dict.
+    return list(dict_conf.get('loggers').keys())
+
+
 def run():
     """
     Main program loop - executes threads for serial port listener, GPIO control, and USB file operations
@@ -88,9 +140,8 @@ def run():
     data_signal = threading.Event()
     usb_signal = threading.Event()
 
-    led_th = threading.Thread(target=led_thread, name='raspi-led', kwargs={'e_signal': exit_signal,
-                                                                           'd_signal': data_signal,
-                                                                           'u_signal': usb_signal})
+    led_th = threading.Thread(target=led_thread, name='raspi-led',
+                              kwargs={'e_signal': exit_signal, 'd_signal': data_signal, 'u_signal': usb_signal})
     led_th.start()
     threads.append(led_th)
 

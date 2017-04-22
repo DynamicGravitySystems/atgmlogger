@@ -15,10 +15,12 @@ def usb_write(pin):
         gpio.output(pin, False)
         time.sleep(.1)
 
+
 def data_write(pin):
     gpio.output(pin, True)
     time.sleep(.2)
     gpio.output(pin, False)
+
 
 def led_thread(e_signal: threading.Event, d_signal: threading.Event, u_signal: threading.Event):
     """
