@@ -36,7 +36,7 @@ def decode_str(byte_str) -> str:
     if isinstance(byte_str, str):
         return byte_str
     try:
-        decoded = byte_str.decode('utf-8')
+        decoded = byte_str.decode('utf-8').strip('\r\n')
     except UnicodeDecodeError:
         illegal = [0, 255]
         decoded = bytes([x for x in byte_str if x not in illegal]).decode('utf-8')
@@ -60,27 +60,32 @@ def logger_thread(dev_path, e_signal: threading.Event, d_signal: threading.Event
     :return: 
     """
     try:
-        serial_hdl = serial.Serial(dev_path, baudrate=SER_BAUDRATE)
+        serial_hdl = serial.Serial(dev_path, baudrate=SER_BAUDRATE, timeout=2)
     except serial.SerialException:
         logging.getLogger(LOG_NAME).debug('exception trying to open port %s', dev_path)
         return 1
 
+    glog = logging.getLogger(LOG_NAME)
+    glog.debug('Logging thread initialized: Waiting for Data')
     while not e_signal.is_set():
         try:
-            logging.getLogger(LOG_NAME).debug('trying to read data')
-            log_data("Waiting for Input")
             data = decode_str(serial_hdl.readline())
+            if data == '':
+                continue
             if data is not None:
                 # TODO: Add logging output from data
                 if d_signal:
                     d_signal.set()
+                glog.debug('Data Received')
+                #print(repr(data))
                 log_data(data)
         except serial.SerialException:
-            logging.getLogger(LOG_NAME).debug('encountered serial exception while attempting to read from port')
+            glog.info('Encountered serial exception while attempting to read from port.')
             serial_hdl.close()
             return 1
 
-    logging.getLogger(LOG_NAME).debug('Closing serial handle')
+    glog.info('Exit Signal Received: Closing serial connection.')
+    glog.debug('Exit Signal Received: Closing serial connection.')
     serial_hdl.close()
     return 0
 
@@ -122,8 +127,8 @@ def configure_logging(conf_file=None):
     dict_conf = yaml.load(resource)
 
     # Do some path checking on any 'filename' keys in dict_conf['handlers']
-    #default_path = '/var/log/dgslogger'
-    default_path = './logs'
+    default_path = '/var/log/dgs'
+    #default_path = './logs'
     make_default = True
     # Iterate through dict_conf 'handlers' looking for
     dict_conf = check_config_paths(dict_conf, default_path)
@@ -161,22 +166,32 @@ def run():
     threads.append(led_th)
 
     while not exit_signal.is_set():
-        ports = comports()
-        if ports:
-            port = ports[0].device
-        else:
-            log.warning('No Ports available')
+    #    ports = comports()
+    #    if ports:
+    #        port = ports[0].device
+    #    else:
+    #        log.warning('No Ports available')
+    #        time.sleep(POLL_INTERVAL)
+    #        continue
+        try:
+            port = '/dev/ttyS0'
+            threads = list(filter(is_alive, threads[:]))
+            if port not in [th.name for th in threads]:
+                log.debug('Spawning new thread for %s', port)
+                n_thread = threading.Thread(target=logger_thread, name=port,
+                                            kwargs={'dev_path': port, 'e_signal': exit_signal, 'd_signal': data_signal})
+                n_thread.start()
+                threads.append(n_thread)
+
             time.sleep(POLL_INTERVAL)
-            continue
+        except KeyboardInterrupt:
+            exit_signal.set()
+            log.info('Program Interrupted, gracefully shutting down')
+    for thread in threads:
+        if thread.is_alive():
+            print("Thread {} is still alive - attempting to join".format(thread.name))
+            thread.join()
+            print("Thread {} ended".format(thread.name))
 
-        threads = list(filter(is_alive, threads[:]))
-        if port not in [th.name for th in threads]:
-            log.debug('Spawning new thread for %s', port)
-            n_thread = threading.Thread(target=logger_thread, name=port,
-                                        kwargs={'dev_path': port, 'e_signal': exit_signal, 'd_signal': data_signal})
-            n_thread.start()
-            threads.append(n_thread)
-
-        time.sleep(POLL_INTERVAL)
-    log.debug('Program Exiting')
+    log.info('Program Exiting')
     return 0
