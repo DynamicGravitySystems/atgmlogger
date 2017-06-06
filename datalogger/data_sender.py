@@ -4,6 +4,7 @@ import time
 import argparse
 import sys
 import logging
+import logging.handlers
 
 import serial
 from serial.tools.list_ports import comports
@@ -30,8 +31,11 @@ def get_handle(device=None, baudrate=57600):
 
 
 def run(source, rate, count=0, repeat=False):
-    log = logging.getLogger('debug')
+    log = logging.getLogger(__name__)
     log.setLevel(logging.DEBUG)
+    std_hdlr = logging.StreamHandler(stream=sys.stdout)
+    std_hdlr.setLevel(logging.DEBUG)
+    log.addHandler(std_hdlr)
 
     log.info("Preparing data-source for transmission")
     data = open(source, 'r', encoding='utf-8')
