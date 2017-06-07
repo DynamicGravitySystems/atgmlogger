@@ -144,10 +144,6 @@ class SerialLogger:
         gpio.setwarnings(False)
         gpio.setmode(gpio.BOARD)
 
-        gpio.setup(self.data_led, gpio.OUT)
-        gpio.setup(self.usb_led, gpio.OUT)
-        gpio.setup(self.aux_led, gpio.OUT)
-
         def blink_led(pin, duration=.1):
             """Turn an output at pin on for duration, then off"""
             # Gets the current state of an output (not necessary currently)
@@ -155,6 +151,11 @@ class SerialLogger:
             gpio.output(pin, True)
             time.sleep(duration)
             gpio.output(pin, False)
+
+        outputs = [self.data_led, self.usb_led, self.aux_led]
+        for output in outputs:
+            gpio.setup(output, gpio.OUT)
+            blink_led(output)  # Test single blink on each LED
 
         while not self.exit_signal.is_set():
             # USB signal takes precedence over data recording
@@ -192,6 +193,7 @@ class SerialLogger:
                     threads.append(dev_thread)
             except KeyboardInterrupt:
                 self.clean_exit(threads)
+                return 0
 
             time.sleep(self.thread_poll_interval)
         # Run loop exited - cleanup and return
@@ -201,6 +203,7 @@ class SerialLogger:
 
 if __name__ == "__main__":
     main = SerialLogger(sys.argv)
+    exit_code = 1
     try:
         exit_code = main.run()
     except KeyboardInterrupt:
