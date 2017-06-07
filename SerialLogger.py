@@ -49,8 +49,8 @@ class SerialLogger:
 
         # LED Signal Settings
         self.data_led = 11
-        self.usb_led = 13
-        self.aux_led = 15
+        self.usb_led = 16
+        self.aux_led = 18
 
         self.log.info("SerialLogger initialized.")
 
@@ -114,6 +114,7 @@ class SerialLogger:
             try:
                 data = self.decode(handle.readline())
                 self.log.log(self.data_level, data)
+                self.data_signal.set()
             except serial.SerialException:
                 self.log.exception('Exception encountered attempting to read from device %s', device)
                 handle.close()
@@ -128,6 +129,7 @@ class SerialLogger:
             self.log.warning("GPIO Module is not available, LED signaling will not function.")
             return 1
         # Initialize Raspberry Pi GPIO pins
+        gpio.setwarnings(False)
         gpio.setmode(gpio.BOARD)
 
         gpio.setup(self.data_led, gpio.OUT)
@@ -187,5 +189,9 @@ class SerialLogger:
 
 if __name__ == "__main__":
     main = SerialLogger(sys.argv)
-    exit_code = main.run()
-    print(exit_code)
+    try:
+        exit_code = main.run()
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt intercepted. Exiting Program.")
+    finally:
+        exit(exit_code)
