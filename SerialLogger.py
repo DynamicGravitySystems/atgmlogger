@@ -7,6 +7,7 @@ import logging
 import logging.config
 import threading
 import shutil
+import uuid
 
 import serial
 try:
@@ -40,6 +41,7 @@ class SerialLogger:
         opts = parser.parse_args(argv[1:])
 
         self.thread_poll_interval = 1   # Seconds to sleep between run loops
+        self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
 
         # Logging definitions
         self.logdir = os.path.abspath(opts.logdir)
@@ -53,6 +55,7 @@ class SerialLogger:
         self.exit_signal = threading.Event()
         self.data_signal = threading.Event()
         self.usb_signal = threading.Event()
+        self.err_signal = threading.Event()
 
         # Serial Port Settings (TODO: Read these from configuration file)
         self.device = opts.device
@@ -64,6 +67,9 @@ class SerialLogger:
         self.data_led = 16
         self.usb_led = 18
         self.aux_led = 15
+
+        # USB Mount Path
+        self.usbdev = '/media/usb0'
 
         self.log.info("SerialLogger initialized.")
 
@@ -184,29 +190,58 @@ class SerialLogger:
                 self.data_signal.clear()
 
     def usb_utility(self):
-        usbdev = '/media/usb0'
-        poll_int = 5
         copied = False
 
+        def get_free(device_path):
+            """Return available free bytes on device_path"""
+            stat = os.statvfs(device_path)
+            blk_size = stat.f_bsize
+            blk_avail = stat.f_bavail
+
+            avail_bytes = blk_size * blk_avail
+            # avail_mib = avail_bytes / (1024 ** 1024)
+            return avail_bytes
+
         while not self.exit_signal.is_set():
-            if os.path.ismount(usbdev):
-                self.log.debug("USB device detected at {}".format(usbdev))
-                if not copied:
-                    log_files = os.listdir(self.logdir)
-                    for log in log_files:
-                        self.log.debug("Copying log file: %s", log)
-                        log_path = os.path.join(self.logdir, log)
-                        shutil.copy(log_path, os.path.join(usbdev, log))
-                    self.log.debug("All log files copied to USB device")
+            if not os.path.ismount(self.usbdev):
+                copied = False
+                time.sleep(self.usb_poll_interval)
+                continue
+
+            if not copied:
+                self.log.debug("USB device detected at {}".format(self.usbdev))
+                self.usb_signal.set()
+
+                copy_list = []
+                log_files = os.listdir(self.logdir)
+                log_size = 0  # Total size of logs in bytes
+                for log in [data_f for data_f in log_files if (os.path.splitext(data_f)[1] == '.dat')]:
+                    l_path = os.path.join(self.logdir, log)
+                    l_size = os.path.getsize(l_path)
+                    log_size += l_size
+                    copy_list.append(l_path)
+
+                if log_size > get_free(self.usbdev):
+                    self.log.critical("USB Device does not have enough free space to copy logs")
+                    self.err_signal.set()
                     copied = True
-                else:
-                    pass  # Files were already copied
+                    continue
+                # Else:
+                dir_uid = uuid.uuid4()
+                dest_dir = os.path.abspath(os.path.join(self.usbdev, dir_uid))
+                os.mkdir(dest_dir)
+
+                for file in copy_list:
+                    self.log.debug("Copying log file: %s", file)
+                    shutil.copy(file, os.path.join(dest_dir, log))
+                self.log.debug("All log files copied to USB device")
+                copied = True
+                os.sync()
+                self.usb_signal.clear()
             else:
-                copied = False  # Reset copied value when device is removed (copy again next time it is plugged in)
+                pass  # Files were already copied
 
-            time.sleep(poll_int)
-
-
+            time.sleep(self.usb_poll_interval)
 
     def run(self):
         threads = []
