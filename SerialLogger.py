@@ -227,7 +227,7 @@ class SerialLogger:
                     copied = True
                     continue
                 # Else:
-                dir_uid = uuid.uuid4()
+                dir_uid = str(uuid.uuid4())
                 dest_dir = os.path.abspath(os.path.join(self.usbdev, dir_uid))
                 os.mkdir(dest_dir)
 
