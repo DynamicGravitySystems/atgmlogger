@@ -6,7 +6,6 @@ import yaml
 import logging
 import logging.config
 import threading
-import pkg_resources
 
 import serial
 try:
@@ -61,8 +60,8 @@ class SerialLogger:
         :return:
         """
         config_f = 'logging.yaml'
-        log_resource = pkg_resources.resource_stream(__package__, config_f)
-        log_dict = yaml.load(log_resource)
+        log_yaml = open(config_f, 'r')
+        log_dict = yaml.load(log_yaml)
 
         # Apply base logdir to any filepaths in log_dict
         for hdlr, properties in log_dict.get('handlers').items():
