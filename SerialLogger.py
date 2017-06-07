@@ -6,6 +6,7 @@ import yaml
 import logging
 import logging.config
 import threading
+import shutil
 
 import serial
 try:
@@ -97,9 +98,16 @@ class SerialLogger:
         verbosity = {0: logging.CRITICAL, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG}
         self.log.setLevel(verbosity[self.verbosity])
 
+        self.log.debug("Log files will be saved to %s", self.logdir)
+
     def clean_exit(self, threads):
+        """
+        Force a clean exit from the program, joining all threads before returning.
+        :param threads:
+        :return:
+        """
         self.exit_signal.set()
-        self.log.info("Application exiting, joining threads.")
+        self.log.warning("Application exiting, joining threads.")
         for thread in threads:
             if thread.is_alive():
                 self.log.debug("Thread {} is still alive, joining.".format(thread.name))
@@ -134,9 +142,7 @@ class SerialLogger:
                 if data is not None:
                     self.log.log(self.data_level, data)
                     self.data_signal.set()
-
-                    if self.verbosity > 1:
-                        self.log.debug(data)
+                    self.log.debug(data)
 
             except serial.SerialException:
                 self.log.exception('Exception encountered attempting to read from device %s', device)
@@ -178,7 +184,29 @@ class SerialLogger:
                 self.data_signal.clear()
 
     def usb_utility(self):
-        pass
+        usbdev = '/media/usb0'
+        poll_int = 5
+        copied = False
+
+        while not self.exit_signal.is_set():
+            if os.path.ismount(usbdev):
+                self.log.debug("USB device detected at {}".format(usbdev))
+                if not copied:
+                    log_files = os.listdir(self.logdir)
+                    for log in log_files:
+                        self.log.debug("Copying log file: %s", log)
+                        log_path = os.path.join(self.logdir, log)
+                        shutil.copy(log_path, os.path.join(usbdev, log))
+                    self.log.debug("All log files copied to USB device")
+                    copied = True
+                else:
+                    pass  # Files were already copied
+            else:
+                copied = False  # Reset copied value when device is removed (copy again next time it is plugged in)
+
+            time.sleep(poll_int)
+
+
 
     def run(self):
         threads = []
@@ -204,13 +232,12 @@ class SerialLogger:
                     dev_thread.start()
                     threads.append(dev_thread)
             except KeyboardInterrupt:
-                self.clean_exit(threads)
-                return 0
+                return self.clean_exit(threads)
 
             time.sleep(self.thread_poll_interval)
         # Run loop exited - cleanup and return
-        self.clean_exit(threads)
-        return 0
+        # TODO: This method and above try/except are never called as KeyboardInterrupt is captured outside in main block
+        return self.clean_exit(threads)
 
 
 if __name__ == "__main__":

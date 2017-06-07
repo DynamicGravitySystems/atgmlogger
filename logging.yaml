@@ -29,7 +29,7 @@ handlers:
     level: DEBUG
     filters: [data_filter]
 
-  file_hdlr:
+  app_hdlr:
     class: logging.handlers.TimedRotatingFileHandler
     formatter: applog_fmtr
     filename: /var/log/dgs/application.log
@@ -43,5 +43,5 @@ handlers:
 loggers:
   datalog:
     level: DEBUG
-    handlers: [data_hdlr, debug_hdlr, file_hdlr]
+    handlers: [data_hdlr, debug_hdlr, app_hdlr]
     propogate: False
