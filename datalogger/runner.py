@@ -4,6 +4,7 @@ import threading
 import time
 import os
 import logging
+import logging.config
 import sys
 import pkg_resources
 
@@ -19,6 +20,11 @@ except ImportError:
         return False
 
 
+LOG_NAME = 'datalog'
+LOG_CONFIG = 'logging.yaml'
+SER_BAUDRATE = 57600
+POLL_INTERVAL = 1
+
 # decode_str :: [Byte] -> String
 def decode_str(byte_str) -> str:
     """
@@ -30,7 +36,7 @@ def decode_str(byte_str) -> str:
     if isinstance(byte_str, str):
         return byte_str
     try:
-        decoded = byte_str.decode('utf-8')
+        decoded = byte_str.decode('utf-8').strip('\r\n')
     except UnicodeDecodeError:
         illegal = [0, 255]
         decoded = bytes([x for x in byte_str if x not in illegal]).decode('utf-8')
@@ -39,7 +45,13 @@ def decode_str(byte_str) -> str:
     return decoded
 
 
-def logger_thread(dev_path, e_signal: threading.Event, d_signal: threading.Event=None):
+def log_data(data):
+    log = logging.getLogger(LOG_NAME)
+    log.log(60, data)
+
+
+def logger_thread(dev_path, e_signal: threading.Event, d_signal: threading.Event=None,
+                  l_signal: threading.Event=None):
     """
     
     :param dev_path: FileSystem path to Serial Device to read from
@@ -48,25 +60,32 @@ def logger_thread(dev_path, e_signal: threading.Event, d_signal: threading.Event
     :return: 
     """
     try:
-        serial_hdl = serial.Serial(dev_path, baudrate=57600)
+        serial_hdl = serial.Serial(dev_path, baudrate=SER_BAUDRATE, timeout=2)
     except serial.SerialException:
-        logging.getLogger('debug').debug('exception trying to open port %s', dev_path)
+        logging.getLogger(LOG_NAME).debug('exception trying to open port %s', dev_path)
         return 1
 
+    glog = logging.getLogger(LOG_NAME)
+    glog.debug('Logging thread initialized: Waiting for Data')
     while not e_signal.is_set():
         try:
-            logging.getLogger('debug').debug('trying to read data')
             data = decode_str(serial_hdl.readline())
+            if data == '':
+                continue
             if data is not None:
                 # TODO: Add logging output from data
                 if d_signal:
                     d_signal.set()
-                print(data)
+                glog.debug('Data Received')
+                #print(repr(data))
+                log_data(data)
         except serial.SerialException:
-            logging.getLogger('debug').debug('encountered serial exception while attempting to read from port')
+            glog.info('Encountered serial exception while attempting to read from port.')
             serial_hdl.close()
             return 1
 
+    glog.info('Exit Signal Received: Closing serial connection.')
+    glog.debug('Exit Signal Received: Closing serial connection.')
     serial_hdl.close()
     return 0
 
@@ -93,7 +112,6 @@ def check_config_paths(config_dict, fallback_path=None):
             n_config_dict['handlers'][handler]['filename'] = os.path.normpath(
                 os.path.join(fallback_path, filename)
             )
-
     return n_config_dict
 
 
@@ -109,7 +127,8 @@ def configure_logging(conf_file=None):
     dict_conf = yaml.load(resource)
 
     # Do some path checking on any 'filename' keys in dict_conf['handlers']
-    default_path = '/var/log/dgslogger'
+    default_path = '/var/log/dgs'
+    #default_path = './logs'
     make_default = True
     # Iterate through dict_conf 'handlers' looking for
     dict_conf = check_config_paths(dict_conf, default_path)
@@ -131,9 +150,10 @@ def run():
     """
 
     # Note: Ports should always be referenced by the full device path, e.g. /dev/ttyUSB0
-    debug_logger = logging.getLogger('debug')
-    debug_logger.setLevel(logging.DEBUG)
-    debug_logger.addHandler(logging.StreamHandler(stream=sys.stdout))
+
+    configure_logging(LOG_CONFIG)
+    log = logging.getLogger(LOG_NAME)
+    log.info('DGS Logger initialized')
 
     threads = []
     exit_signal = threading.Event()
@@ -146,22 +166,32 @@ def run():
     threads.append(led_th)
 
     while not exit_signal.is_set():
-        ports = comports()
-        if ports:
-            port = ports[0].device
-        else:
-            debug_logger.debug('No ports available, sleeping for .5sec')
-            time.sleep(.5)
+    #    ports = comports()
+    #    if ports:
+    #        port = ports[0].device
+    #    else:
+    #        log.warning('No Ports available')
+    #        time.sleep(POLL_INTERVAL)
+    #        continue
+        try:
+            port = '/dev/ttyS0'
+            threads = list(filter(is_alive, threads[:]))
+            if port not in [th.name for th in threads]:
+                log.debug('Spawning new thread for %s', port)
+                n_thread = threading.Thread(target=logger_thread, name=port,
+                                            kwargs={'dev_path': port, 'e_signal': exit_signal, 'd_signal': data_signal})
+                n_thread.start()
+                threads.append(n_thread)
 
-        threads = list(filter(is_alive, threads[:]))
-        if port not in [th.name for th in threads]:
-            debug_logger.debug('Spawning new thread for %s', port)
-            n_thread = threading.Thread(target=logger_thread, name=port,
-                                        kwargs={'dev_path': port, 'e_signal': exit_signal, 'd_signal': data_signal})
-            n_thread.start()
-            threads.append(n_thread)
+            time.sleep(POLL_INTERVAL)
+        except KeyboardInterrupt:
+            exit_signal.set()
+            log.info('Program Interrupted, gracefully shutting down')
+    for thread in threads:
+        if thread.is_alive():
+            print("Thread {} is still alive - attempting to join".format(thread.name))
+            thread.join()
+            print("Thread {} ended".format(thread.name))
 
-        time.sleep(1)
-
-    debug_logger.debug('Process exiting')
+    log.info('Program Exiting')
     return 0

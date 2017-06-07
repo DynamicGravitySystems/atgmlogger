@@ -8,14 +8,14 @@ formatters:
       datefmt: "%Y-%m-%d - %H:%M:%S"
 filters:
   data_filter:
-    (): dgslogger.util.level_filter
+    (): datalogger.util.level_filter
     level : 60
 
 handlers:
   data_hdlr:
     class : logging.handlers.TimedRotatingFileHandler
     formatter : data_fmtr
-    filename: ./gravdata.dat
+    filename: /var/log/dgs/gravdata.dat
     when: MIDNIGHT
     interval: 1
     backupCount: 30
@@ -32,8 +32,7 @@ handlers:
   file_hdlr:
     class: logging.handlers.TimedRotatingFileHandler
     formatter: applog_fmtr
-    filename: ./dgslogger.log
-#   filename: /var/log/dgslogger/dgslogger.log
+    filename: /var/log/dgs/application.log
     when: MIDNIGHT
     interval: 1
     backupCount: 60
@@ -42,7 +41,7 @@ handlers:
     filters: [data_filter]
 
 loggers:
-  dgslogger:
+  datalog:
     level: DEBUG
     handlers: [data_hdlr, debug_hdlr, file_hdlr]
     propogate: False
