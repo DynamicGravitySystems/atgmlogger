@@ -125,8 +125,15 @@ class SerialLogger:
         while not self.exit_signal.is_set():
             try:
                 data = self.decode(handle.readline())
-                self.log.log(self.data_level, data)
-                self.data_signal.set()
+                if data == '':
+                    continue
+                if data is not None:
+                    self.log.log(self.data_level, data)
+                    self.data_signal.set()
+
+                    if self.verbosity > 1:
+                        self.log.debug(data)
+
             except serial.SerialException:
                 self.log.exception('Exception encountered attempting to read from device %s', device)
                 handle.close()
@@ -182,6 +189,7 @@ class SerialLogger:
         threads.append(usb_thread)
 
         while not self.exit_signal.is_set():
+            self.log.debug("Entering main loop.")
             try:
                 # Filter out dead threads
                 threads = list(filter(lambda x: x.is_alive(), threads[:]))
@@ -207,6 +215,7 @@ if __name__ == "__main__":
     try:
         exit_code = main.run()
     except KeyboardInterrupt:
-        print("KeyboardInterrupt intercepted. Exiting Program.")
+        print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
+        main.exit_signal.set()
     finally:
         exit(exit_code)
