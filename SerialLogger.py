@@ -60,9 +60,9 @@ class SerialLogger:
         self.stopbits = serial.STOPBITS_ONE
 
         # LED Signal Settings
-        self.data_led = 11
-        self.usb_led = 16
-        self.aux_led = 18
+        self.data_led = 16
+        self.usb_led = 18
+        self.aux_led = 15
 
         self.log.info("SerialLogger initialized.")
 
@@ -89,9 +89,13 @@ class SerialLogger:
             os.makedirs(self.logdir, mode=0o755, exist_ok=False)
 
         logging.config.dictConfig(log_dict)
+
         # Select only the first logger defined in the log yaml
         self.logname = list(log_dict.get('loggers').keys())[0]
         self.log = logging.getLogger(self.logname)
+
+        verbosity = {0: logging.CRITICAL, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG}
+        self.log.setLevel(verbosity[self.verbosity])
 
     def clean_exit(self, threads):
         self.exit_signal.set()
@@ -188,8 +192,8 @@ class SerialLogger:
         usb_thread.start()
         threads.append(usb_thread)
 
+        self.log.debug("Entering main loop.")
         while not self.exit_signal.is_set():
-            self.log.debug("Entering main loop.")
             try:
                 # Filter out dead threads
                 threads = list(filter(lambda x: x.is_alive(), threads[:]))
