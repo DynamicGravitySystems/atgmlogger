@@ -183,9 +183,9 @@ class SerialLogger:
             time.sleep(duration)
 
         outputs = [self.data_led, self.usb_led, self.aux_led]
-        for output in outputs:
-            gpio.setup(output, gpio.OUT)
-            blink_led(output)  # Test single blink on each LED
+        for pin in outputs:
+            gpio.setup(pin, gpio.OUT)
+            blink_led(pin)  # Test single blink on each LED
 
         while not self.exit_signal.is_set():
             # USB signal takes precedence over data recording
@@ -200,6 +200,12 @@ class SerialLogger:
                 gpio.output(self.aux_led, True)
             else:
                 gpio.output(self.aux_led, False)
+
+        # Exiting: Turn off all outputs, then call cleanup()
+        for pin in outputs:
+            gpio.output(pin, False)
+        gpio.cleanup()
+        self.log.info("Led thread gracefully exited")
 
     def usb_utility(self):
         """
@@ -224,28 +230,25 @@ class SerialLogger:
         while not self.exit_signal.is_set():
             if not os.path.ismount(self.usbdev):
                 copied = False
-                time.sleep(self.usb_poll_interval)
-                continue
-
-            if not copied:
-                self.log.warning("USB device detected at {}".format(self.usbdev))
+            elif not copied:
+                self.log.info("USB device detected at {}".format(self.usbdev))
                 self.usb_signal.set()
 
-                copy_list = []
-                log_size = 0  # Total size of logs in bytes
+                copy_list = []  # List of files to be copied to storage
+                copy_size = 0  # Total size of logs in bytes
                 for log_file in glob.glob(os.path.join(self.logdir, pattern)):
                     # glob retrurns an absolute path
                     f_size = os.path.getsize(os.path.join(self.logdir, log_file))
-                    log_size += f_size
+                    copy_size += f_size
                     copy_list.append(log_file)
 
-                if log_size > get_free(self.usbdev):
+                if copy_size > get_free(self.usbdev):
                     self.log.critical("USB Device does not have enough free space to copy logs")
                     self.err_signal.set()
                     copied = True
                     continue
-                # Else: (implied)
-                dir_uid = str(uuid.uuid4())
+                # else: (implied)
+                dir_uid = str(uuid.uuid4())  # Logs will be copied into unique dir as to not overwrite anything
                 dest_dir = os.path.abspath(os.path.join(self.usbdev, dir_uid))
                 self.log.info("Files will be copied to %s", dest_dir)
                 os.mkdir(dest_dir)
@@ -256,14 +259,15 @@ class SerialLogger:
                     try:
                         shutil.copy(src_file, os.path.join(dest_dir, src_file_name))
                     except OSError:
+                        copied = True
                         self.log.exception("Error copying %s to USB device", src_file)
                 self.log.info("All log files copied to USB device")
                 copied = True
-                os.sync()
+                os.sync()  # Call filesystem sync after copying files
+                time.sleep(2)
                 self.usb_signal.clear()
-            else:
-                pass  # Files were already copied
 
+            # Finally:
             time.sleep(self.usb_poll_interval)
 
     def run(self):
