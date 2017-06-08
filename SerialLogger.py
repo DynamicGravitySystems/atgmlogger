@@ -1,6 +1,7 @@
 import os
 import sys
 import argparse
+import glob
 import time
 import yaml
 import logging
@@ -14,7 +15,7 @@ try:
     import RPi.GPIO as gpio
 except ImportError:
     print("Raspberry PI GPIO Module is not available, LED signaling disabled.")
-    gpio = False
+    gpio = None
 
 
 def level_filter(level):
@@ -134,6 +135,11 @@ class SerialLogger:
         return decoded
 
     def device_listener(self, device=None):
+        """
+        Target function for serial data collection thread, called from run() method.
+        :param device: Full path to the serial device to listen on e.g. /dev/ttyS0
+        :return: Int exit_code. 0 = success, 1 = error.
+        """
         try:
             handle = serial.Serial(device, baudrate=self.baudrate, parity=self.parity,
                                    stopbits=self.stopbits, timeout=1)
@@ -174,6 +180,7 @@ class SerialLogger:
             gpio.output(pin, True)
             time.sleep(duration)
             gpio.output(pin, False)
+            time.sleep(duration)
 
         outputs = [self.data_led, self.usb_led, self.aux_led]
         for output in outputs:
@@ -189,8 +196,20 @@ class SerialLogger:
                 blink_led(self.data_led)
                 self.data_signal.clear()
 
+            if self.err_signal.is_set():
+                gpio.output(self.err_signal, True)
+            else:
+                gpio.output(self.err_signal, False)
+
     def usb_utility(self):
+        """
+        Target function for usb transfer thread. This thread monitors for the presence of a filesystem at an arbitrary
+        mount point, and if it detects one it attempts to copy any relevant log/data files from the local SD card
+        storage.
+        :return: 
+        """
         copied = False
+        pattern = '*.dat*'
 
         def get_free(device_path):
             """Return available free bytes on device_path"""
@@ -209,13 +228,12 @@ class SerialLogger:
                 continue
 
             if not copied:
-                self.log.debug("USB device detected at {}".format(self.usbdev))
+                self.log.warning("USB device detected at {}".format(self.usbdev))
                 self.usb_signal.set()
 
                 copy_list = []
-                log_files = os.listdir(self.logdir)
                 log_size = 0  # Total size of logs in bytes
-                for log in [data_f for data_f in log_files if (os.path.splitext(data_f)[1] == '.dat')]:
+                for log in glob.glob(os.path.join(self.logdir, pattern)):
                     l_path = os.path.join(self.logdir, log)
                     l_size = os.path.getsize(l_path)
                     log_size += l_size
@@ -226,14 +244,18 @@ class SerialLogger:
                     self.err_signal.set()
                     copied = True
                     continue
-                # Else:
+                # Else: (implied)
                 dir_uid = str(uuid.uuid4())
                 dest_dir = os.path.abspath(os.path.join(self.usbdev, dir_uid))
+                self.log.info("Files will be copied to %s", dest_dir)
                 os.mkdir(dest_dir)
 
                 for file in copy_list:
                     self.log.debug("Copying log file: %s", file)
-                    shutil.copy(file, os.path.join(dest_dir, log))
+                    try:
+                        shutil.copy(file, os.path.join(dest_dir, log))
+                    except OSError:
+                        self.log.exception("Error copying %s to USB device", file)
                 self.log.debug("All log files copied to USB device")
                 copied = True
                 os.sync()
