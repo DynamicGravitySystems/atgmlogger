@@ -183,7 +183,7 @@ class SerialLogger:
         while not self.exit_signal.is_set():
             # USB signal takes precedence over data recording
             if self.usb_signal.is_set():
-                blink_led(self.usb_led)
+                blink_led(self.usb_led, duration=.05)
                 # Don't clear the signal, the transfer logic will clear when complete
             elif self.data_signal.is_set():
                 blink_led(self.data_led)
