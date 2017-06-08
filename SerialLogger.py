@@ -70,7 +70,7 @@ class SerialLogger:
         self.aux_led = 15
 
         # USB Mount Path
-        self.usbdev = '/media/usb0'
+        self.usbdev = '/media/usb1'
 
         self.log.info("SerialLogger initialized.")
 
@@ -197,9 +197,9 @@ class SerialLogger:
                 self.data_signal.clear()
 
             if self.err_signal.is_set():
-                gpio.output(self.err_signal, True)
+                gpio.output(self.aux_led, True)
             else:
-                gpio.output(self.err_signal, False)
+                gpio.output(self.aux_led, False)
 
     def usb_utility(self):
         """
@@ -233,11 +233,11 @@ class SerialLogger:
 
                 copy_list = []
                 log_size = 0  # Total size of logs in bytes
-                for log in glob.glob(os.path.join(self.logdir, pattern)):
-                    l_path = os.path.join(self.logdir, log)
-                    l_size = os.path.getsize(l_path)
-                    log_size += l_size
-                    copy_list.append(l_path)
+                for log_file in glob.glob(os.path.join(self.logdir, pattern)):
+                    # glob retrurns an absolute path
+                    f_size = os.path.getsize(os.path.join(self.logdir, log_file))
+                    log_size += f_size
+                    copy_list.append(log_file)
 
                 if log_size > get_free(self.usbdev):
                     self.log.critical("USB Device does not have enough free space to copy logs")
@@ -250,13 +250,14 @@ class SerialLogger:
                 self.log.info("Files will be copied to %s", dest_dir)
                 os.mkdir(dest_dir)
 
-                for file in copy_list:
-                    self.log.debug("Copying log file: %s", file)
+                for src_file in copy_list:
+                    _, src_file_name = os.path.split(src_file)
+                    self.log.info("Copying log file: %s", src_file)
                     try:
-                        shutil.copy(file, os.path.join(dest_dir, log))
+                        shutil.copy(src_file, os.path.join(dest_dir, src_file_name))
                     except OSError:
-                        self.log.exception("Error copying %s to USB device", file)
-                self.log.debug("All log files copied to USB device")
+                        self.log.exception("Error copying %s to USB device", src_file)
+                self.log.info("All log files copied to USB device")
                 copied = True
                 os.sync()
                 self.usb_signal.clear()
