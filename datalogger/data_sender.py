@@ -1,7 +1,10 @@
 # coding=utf-8
 
 import time
-import os
+import argparse
+import sys
+import logging
+import logging.handlers
 
 import serial
 from serial.tools.list_ports import comports
@@ -18,6 +21,7 @@ def get_handle(device=None, baudrate=57600):
     if device is None:
         try:
             device = comports()[0].device
+            print("Sending data via comport: {}".format(device))
         except serial.SerialException:
             print('Error determining port to open')
             return 1
@@ -26,19 +30,61 @@ def get_handle(device=None, baudrate=57600):
     return serial_hdl
 
 
-def run(source, rate=1):
+def run(source, rate, count=0, repeat=False):
+    log = logging.getLogger(__name__)
+    log.setLevel(logging.DEBUG)
+    std_hdlr = logging.StreamHandler(stream=sys.stdout)
+    std_hdlr.setLevel(logging.DEBUG)
+    log.addHandler(std_hdlr)
+
+    log.info("Preparing data-source for transmission")
     data = open(source, 'r', encoding='utf-8')
+    alldata = data.readlines()
+    data.close()
+    log.info("Data loaded into memory")
+    log.info("Sending line every {} seconds".format(rate))
+
+    if count == 0:
+        count = len(alldata)
+
+    send_count = 0
     ser_hdl = get_handle()
-    line = data.readline()
-    while line is not '':
-        print("sending line: {}".format(line))
-        sendline(ser_hdl, line)
-        time.sleep(rate)
-        line = data.readline()
-    sendline(ser_hdl, '\n')
-    print("Exhausted data")
+
+    if repeat:
+        while True:
+            for line in alldata:
+                pass
+    else:
+        for line in alldata:
+            if send_count >= count:
+                break
+            try:
+                sendline(ser_hdl, line)
+                send_count += 1
+                time.sleep(rate)
+            except KeyboardInterrupt:
+                print("Execution interrupted - total lines sent: {}".format(send_count))
+                sendline(ser_hdl, '\n\n')
+                ser_hdl.close()
+                return 0
+        print("Exhausted Data, total sent: {}".format(send_count))
+
     ser_hdl.close()
 
-if __name__ == "__main__":
-    run('data.txt')
 
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="SerialSender", description="Send arbitrary data over a serial port")
+    parser.add_argument('-c', '--count', type=int, default=0)
+    parser.add_argument('-r', '--repeat', action='store_true')
+    parser.add_argument('-i', '--interval', type=float, default=1)
+    parser.add_argument('-f', '--file', required=True)
+
+    opts = parser.parse_args(argv)
+    if opts.repeat:
+        print("Sending data forever")
+
+    run(opts.file, opts.interval, opts.count, opts.repeat)
+
+
+if __name__ == "__main__":
+    main(sys.argv)
