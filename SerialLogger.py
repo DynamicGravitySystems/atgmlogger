@@ -38,18 +38,49 @@ class SerialLogger:
                             version='0.1')
         parser.add_argument('-v', '--verbose', action='count')
         parser.add_argument('-l', '--logdir', action='store', default='/var/log/dgs')
-        parser.add_argument('-d', '--device', action='store', default='/dev/ttyS0')
+        parser.add_argument('-d', '--device', action='store')
+        parser.add_argument('-c', '--configuration', action='store', default='config.yaml')
         opts = parser.parse_args(argv[1:])
+
+        # Default settings in the event of missing config.yaml file.
+        defaults = {
+            'version': 0.1,
+            'usb': {
+                'mount': '/media/removable',
+                'copy_level': 'all'
+            },
+            'logging': {
+                'logdir': '/var/log/dgs/'
+            },
+            'serial': {
+                'device': '/dev/ttyS0',
+                'baudrate': 57600,
+                'bytesize': 8,
+                'parity': 'N',
+                'stopbits': 1,
+                'flowctrl': 0,
+                'timeout': 1
+            },
+            'signal': {
+                'data_led': 16,
+                'usb_led': 18,
+                'aux_led': 22
+            }
+        }
+
+        self.config = self.load_config(opts.configuration, defaults)
 
         self.thread_poll_interval = 1   # Seconds to sleep between run loops
         self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
 
         # Logging definitions
-        self.logdir = os.path.abspath(opts.logdir)
+        self.logdir = self.config['logging']['logdir']
         self.logname = __name__
         self.log = None
         self.data_level = 60
-        self.verbosity = opts.verbose
+        self.verbosity = self.set_verbosity(opts.verbose)
+        self.verbosity_map = {0: logging.CRITICAL, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG}
+
         self.init_logging()
 
         # Thread signal definitions
@@ -58,21 +89,50 @@ class SerialLogger:
         self.usb_signal = threading.Event()
         self.err_signal = threading.Event()
 
-        # Serial Port Settings (TODO: Read these from configuration file)
-        self.device = opts.device
-        self.baudrate = 57600
-        self.parity = serial.PARITY_NONE
-        self.stopbits = serial.STOPBITS_ONE
+        # Serial Port Settings
+        if opts.device is None:
+            self.device = self.config['serial']['device']
+        else:
+            self.device = opts.device
+        self.baudrate = self.config['serial']['baudrate']
+        self.parity = self.config['serial']['parity']
+        self.stopbits = self.config['serial']['stopbits']
+        self.flowctrl = self.config['serial']['flowctrl']
+        self.bytesize = self.config['serial']['bytesize']
 
         # LED Signal Settings
-        self.data_led = 16
-        self.usb_led = 18
-        self.aux_led = 15
+        self.data_led = self.config['signal']['data_led']
+        self.usb_led = self.config['signal']['usb_led']
+        self.aux_led = self.config['signal']['aux_led']
 
         # USB Mount Path
-        self.usbdev = '/media/usb1'
+        copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
+        self.usbdev = self.config['usb']['mount']
+        self.copy_level = copy_level_map[self.config['usb']['copy_level']]
+
+        # Thread List Object
+        self.threads = []
 
         self.log.info("SerialLogger initialized.")
+
+    @staticmethod
+    def set_verbosity(level, lvlmax=3):
+        if level is None:
+            return 0
+        if level > lvlmax:
+            return lvlmax
+        return level
+
+    @staticmethod
+    def load_config(config_path, default_opts):
+        try:
+            with open(os.path.abspath(config_path), 'r') as config_raw:
+                config_dict = yaml.load(config_raw)
+        except Exception as e:
+            print("Exception encountered loading configuration file, proceeding with defaults.")
+            print(e.__repr__())
+            config_dict = default_opts
+        return config_dict
 
     def init_logging(self):
         """
@@ -102,20 +162,18 @@ class SerialLogger:
         self.logname = list(log_dict.get('loggers').keys())[0]
         self.log = logging.getLogger(self.logname)
 
-        verbosity = {0: logging.CRITICAL, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG}
-        self.log.setLevel(verbosity[self.verbosity])
+        self.log.setLevel(self.verbosity_map[self.verbosity])
 
         self.log.debug("Log files will be saved to %s", self.logdir)
 
-    def clean_exit(self, threads):
+    def clean_exit(self):
         """
         Force a clean exit from the program, joining all threads before returning.
-        :param threads:
-        :return:
+        :return: Int exit_code
         """
         self.exit_signal.set()
         self.log.warning("Application exiting, joining threads.")
-        for thread in threads:
+        for thread in self.threads:
             if thread.is_alive():
                 self.log.debug("Thread {} is still alive, joining.".format(thread.name))
                 thread.join()
@@ -141,8 +199,12 @@ class SerialLogger:
         :return: Int exit_code. 0 = success, 1 = error.
         """
         try:
-            handle = serial.Serial(device, baudrate=self.baudrate, parity=self.parity,
-                                   stopbits=self.stopbits, timeout=1)
+            handle = serial.Serial(device, baudrate=self.baudrate, parity=self.parity, stopbits=self.stopbits,
+                                   bytesize=self.bytesize, timeout=1)
+            self.log.info("Opened serial handle on device:{device} baudrate:{baudrate}, parity:{parity}, "
+                          "stopbits:{stopbits}, bytesize:{bytesize}".format(device=device, baudrate=self.baudrate,
+                                                                            parity=self.parity, stopbits=self.stopbits,
+                                                                            bytesize=self.bytesize))
         except serial.SerialException:
             self.log.exception('Exception encountered attempting to open serial comm port %s', device)
             return 1
@@ -173,13 +235,13 @@ class SerialLogger:
         gpio.setwarnings(False)
         gpio.setmode(gpio.BOARD)
 
-        def blink_led(pin, duration=.1):
+        def blink_led(gpio_pin, duration=.1):
             """Turn an output at pin on for duration, then off"""
             # Gets the current state of an output (not necessary currently)
             # state = gpio.input(pin)
-            gpio.output(pin, True)
+            gpio.output(gpio_pin, True)
             time.sleep(duration)
-            gpio.output(pin, False)
+            gpio.output(gpio_pin, False)
             time.sleep(duration)
 
         outputs = [self.data_led, self.usb_led, self.aux_led]
@@ -190,10 +252,10 @@ class SerialLogger:
         while not self.exit_signal.is_set():
             # USB signal takes precedence over data recording
             if self.usb_signal.is_set():
-                blink_led(self.usb_led, duration=.05)
+                blink_led(self.usb_led, duration=.1)
                 # Don't clear the signal, the transfer logic will clear when complete
             elif self.data_signal.is_set():
-                blink_led(self.data_led)
+                blink_led(self.data_led, duration=.1)
                 self.data_signal.clear()
 
             if self.err_signal.is_set():
@@ -207,6 +269,49 @@ class SerialLogger:
         gpio.cleanup()
         self.log.info("Led thread gracefully exited")
 
+    def copy_logs(self, dest, pattern='*.dat*'):
+        """
+
+        :param dest:
+        :param pattern:
+        :return: True if copy success, False if error
+        """
+        copy_list = []  # List of files to be copied to storage
+        copy_size = 0  # Total size of logs in bytes
+        for log_file in glob.glob(os.path.join(self.logdir, pattern)):
+            copy_size += os.path.getsize(log_file)
+            copy_list.append(log_file)
+        self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
+
+        def get_freebytes(path):
+            statvfs = os.statvfs(os.path.abspath(path))
+            return statvfs.f_bsize * statvfs.f_bavail
+
+        if copy_size > get_freebytes(self.usbdev):
+            self.log.critical("USB Device does not have enough free space to copy logs")
+            self.err_signal.set()
+            return False
+
+        # Else, copy the files:
+        dest_dir = os.path.abspath(os.path.join(dest, str(uuid.uuid4())))
+        self.log.info("File Copy Job Destination: %s", dest_dir)
+        os.mkdir(dest_dir)
+
+        for src in copy_list:
+            _, fname = os.path.split(src)
+            try:
+                dest_file = os.path.join(dest_dir, fname)
+                shutil.copy(src, dest_file)
+                self.log.info("Copied file %s to %s", fname, dest_file)
+            except OSError:
+                self.err_signal.set()
+                self.log.exception("Exception encountered while copying log file.")
+                return False
+
+        os.sync()
+        self.log.info("All logfiles in pattern %s copied successfully", pattern)
+        return True
+
     def usb_utility(self):
         """
         Target function for usb transfer thread. This thread monitors for the presence of a filesystem at an arbitrary
@@ -215,17 +320,6 @@ class SerialLogger:
         :return: 
         """
         copied = False
-        pattern = '*.dat*'
-
-        def get_free(device_path):
-            """Return available free bytes on device_path"""
-            stat = os.statvfs(device_path)
-            blk_size = stat.f_bsize
-            blk_avail = stat.f_bavail
-
-            avail_bytes = blk_size * blk_avail
-            # avail_mib = avail_bytes / (1024 ** 1024)
-            return avail_bytes
 
         while not self.exit_signal.is_set():
             if not os.path.ismount(self.usbdev):
@@ -234,72 +328,42 @@ class SerialLogger:
                 self.log.info("USB device detected at {}".format(self.usbdev))
                 self.usb_signal.set()
 
-                copy_list = []  # List of files to be copied to storage
-                copy_size = 0  # Total size of logs in bytes
-                for log_file in glob.glob(os.path.join(self.logdir, pattern)):
-                    # glob retrurns an absolute path
-                    f_size = os.path.getsize(os.path.join(self.logdir, log_file))
-                    copy_size += f_size
-                    copy_list.append(log_file)
-
-                if copy_size > get_free(self.usbdev):
-                    self.log.critical("USB Device does not have enough free space to copy logs")
-                    self.err_signal.set()
+                copied = self.copy_logs(self.usbdev, self.copy_level)
+                if copied:
+                    time.sleep(2)
+                    self.usb_signal.clear()
+                else:
+                    self.log.info("Copy job failed, not retrying")
                     copied = True
-                    continue
-                # else: (implied)
-                dir_uid = str(uuid.uuid4())  # Logs will be copied into unique dir as to not overwrite anything
-                dest_dir = os.path.abspath(os.path.join(self.usbdev, dir_uid))
-                self.log.info("Files will be copied to %s", dest_dir)
-                os.mkdir(dest_dir)
-
-                for src_file in copy_list:
-                    _, src_file_name = os.path.split(src_file)
-                    self.log.info("Copying log file: %s", src_file)
-                    try:
-                        shutil.copy(src_file, os.path.join(dest_dir, src_file_name))
-                    except OSError:
-                        copied = True
-                        self.log.exception("Error copying %s to USB device", src_file)
-                self.log.info("All log files copied to USB device")
-                copied = True
-                os.sync()  # Call filesystem sync after copying files
-                time.sleep(2)
-                self.usb_signal.clear()
 
             # Finally:
             time.sleep(self.usb_poll_interval)
 
     def run(self):
-        threads = []
+        self.threads = []
 
         # Initialize utility threads
         led_thread = threading.Thread(target=self.led_signaler, name='ledsignal')
         led_thread.start()
-        threads.append(led_thread)
+        self.threads.append(led_thread)
 
         usb_thread = threading.Thread(target=self.usb_utility, name='usbutility')
         usb_thread.start()
-        threads.append(usb_thread)
+        self.threads.append(usb_thread)
 
         self.log.debug("Entering main loop.")
         while not self.exit_signal.is_set():
-            try:
-                # Filter out dead threads
-                threads = list(filter(lambda x: x.is_alive(), threads[:]))
-                if self.device not in [t.name for t in threads]:
-                    self.log.debug("Spawning new thread for device {}".format(self.device))
-                    dev_thread = threading.Thread(target=self.device_listener,
-                                                  name=self.device, kwargs={'device': self.device})
-                    dev_thread.start()
-                    threads.append(dev_thread)
-            except KeyboardInterrupt:
-                return self.clean_exit(threads)
+            # Filter out dead threads
+            self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
+            if self.device not in [t.name for t in self.threads]:
+                self.log.debug("Spawning new thread for device {}".format(self.device))
+                dev_thread = threading.Thread(target=self.device_listener,
+                                              name=self.device, kwargs={'device': self.device})
+                dev_thread.start()
+                self.threads.append(dev_thread)
 
             time.sleep(self.thread_poll_interval)
-        # Run loop exited - cleanup and return
-        # TODO: This method and above try/except are never called as KeyboardInterrupt is captured outside in main block
-        return self.clean_exit(threads)
+        return 0
 
 
 if __name__ == "__main__":
@@ -309,6 +373,6 @@ if __name__ == "__main__":
         exit_code = main.run()
     except KeyboardInterrupt:
         print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
-        main.exit_signal.set()
+        main.clean_exit()
     finally:
         exit(exit_code)

@@ -1,0 +1,19 @@
+version: 0.2
+usb:
+  mount: /media/usb1
+  poll_int: 3
+  copy_level: all
+logging:
+  logdir: /var/log/dgs/
+serial:
+  device: /dev/ttyS0
+  baudrate: 57600
+  bytesize: 8
+  parity: 'N'
+  stopbits: 1
+  flowctrl: 0
+  timeout: 1
+signal:
+  data_led: 16
+  usb_led: 18
+  aux_led: 22
