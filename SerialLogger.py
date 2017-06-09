@@ -8,6 +8,7 @@ import logging
 import logging.config
 import threading
 import shutil
+import subprocess
 import uuid
 
 import serial
@@ -271,9 +272,11 @@ class SerialLogger:
 
     def copy_logs(self, dest, pattern='*.dat*'):
         """
-
-        :param dest:
-        :param pattern:
+        Copies application and data log files from self.logdir directory
+        to the specified 'dest' directory. Files to be copied can be speicifed
+        using a UNIX style glob pattern.
+        :param dest: Destination directory to copy logs to
+        :param pattern: UNIX style glob to match log files for copy
         :return: True if copy success, False if error
         """
         copy_list = []  # List of files to be copied to storage
@@ -308,7 +311,6 @@ class SerialLogger:
                 self.log.exception("Exception encountered while copying log file.")
                 return False
 
-        os.sync()
         self.log.info("All logfiles in pattern %s copied successfully", pattern)
         return True
 
@@ -319,22 +321,22 @@ class SerialLogger:
         storage.
         :return: 
         """
-        copied = False
-
         while not self.exit_signal.is_set():
             if not os.path.ismount(self.usbdev):
-                copied = False
-            elif not copied:
+                pass
+            else:
                 self.log.info("USB device detected at {}".format(self.usbdev))
                 self.usb_signal.set()
 
                 copied = self.copy_logs(self.usbdev, self.copy_level)
                 if copied:
-                    time.sleep(2)
+                    os.sync()
+                    dismounted = subprocess.run(['umount', self.usbdev])
+                    self.log.info("Unmount operation returned with exit code: {}".format(dismounted))
+                    time.sleep(1)
                     self.usb_signal.clear()
                 else:
                     self.log.info("Copy job failed, not retrying")
-                    copied = True
 
             # Finally:
             time.sleep(self.usb_poll_interval)

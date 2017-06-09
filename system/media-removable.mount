@@ -1,0 +1,12 @@
+[Unit]
+Description=Automatically mount removable device to /media/removable
+BindsTo=dev-usbstick.device
+After=dev-usbstick.device
+
+[Mount]
+What=/dev/usbstick
+Where=/media/removable
+ForceUnmount=True
+
+[Install]
+WantedBy=multi-user.target

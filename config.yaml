@@ -1,6 +1,6 @@
 version: 0.2
 usb:
-  mount: /media/usb1
+  mount: /media/removable
   poll_int: 3
   copy_level: all
 logging:
