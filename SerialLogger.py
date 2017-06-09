@@ -69,13 +69,20 @@ class SerialLogger:
             }
         }
 
+        # Deprecated - remove when dependencies resolved
         self.config = self.load_config(opts.configuration, defaults)
+
+        config = self.load_config(opts.configuration, defaults)
+        # Config sub subleafs
+        self.c_usb = config.get('usb', defaults['usb'])
+        self.c_logging = config.get('logging', defaults['logging'])
+        self.c_serial = config.get('serial', defaults['serial'])
+        self.c_signal = config.get('signal', defaults['signal'])
 
         self.thread_poll_interval = 1   # Seconds to sleep between run loops
         self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
 
         # Logging definitions
-        self.logdir = self.config['logging']['logdir']
         self.logname = __name__
         self.log = None
         self.data_level = 60
@@ -95,24 +102,18 @@ class SerialLogger:
             self.device = self.config['serial']['device']
         else:
             self.device = opts.device
-        self.baudrate = self.config['serial']['baudrate']
-        self.parity = self.config['serial']['parity']
-        self.stopbits = self.config['serial']['stopbits']
-        self.flowctrl = self.config['serial']['flowctrl']
-        self.bytesize = self.config['serial']['bytesize']
-
-        # LED Signal Settings
-        self.data_led = self.config['signal']['data_led']
-        self.usb_led = self.config['signal']['usb_led']
-        self.aux_led = self.config['signal']['aux_led']
 
         # USB Mount Path
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
-        self.usbdev = self.config['usb']['mount']
-        self.copy_level = copy_level_map[self.config['usb']['copy_level']]
+        # self.usbdev = self.config['usb']['mount']
+        self.copy_level = copy_level_map[self.c_usb['copy_level']]
 
         # Thread List Object
         self.threads = []
+
+        # Statistics tracking
+        self.last_data = 0
+        self.data_interval = 0
 
         self.log.info("SerialLogger initialized.")
 
@@ -125,7 +126,7 @@ class SerialLogger:
         return level
 
     @staticmethod
-    def load_config(config_path, default_opts):
+    def load_config(config_path, default_opts=None):
         try:
             with open(os.path.abspath(config_path), 'r') as config_raw:
                 config_dict = yaml.load(config_raw)
@@ -141,8 +142,10 @@ class SerialLogger:
         :return:
         """
         config_f = 'logging.yaml'
-        log_yaml = open(config_f, 'r')
-        log_dict = yaml.load(log_yaml)
+        with open(config_f, 'r') as log_yaml:
+            log_dict = yaml.load(log_yaml)
+
+        logdir = self.c_logging['logdir']
 
         # Apply base logdir to any filepaths in log_dict
         for hdlr, properties in log_dict.get('handlers').items():
@@ -150,22 +153,22 @@ class SerialLogger:
             if path:
                 # Rewrite log config path with self.logdir as the base
                 _, fname = os.path.split(path)
-                abs_path = os.path.join(self.logdir, fname)
+                abs_path = os.path.join(logdir, fname)
                 log_dict['handlers'][hdlr]['filename'] = abs_path
 
         # Check/create logging directory
-        if not os.path.exists(self.logdir):
-            os.makedirs(self.logdir, mode=0o755, exist_ok=False)
+        if not os.path.exists(logdir):
+            os.makedirs(logdir, mode=0o755, exist_ok=False)
 
+        # Apply configuration from imported YAML Dict
         logging.config.dictConfig(log_dict)
 
         # Select only the first logger defined in the log yaml
-        self.logname = list(log_dict.get('loggers').keys())[0]
-        self.log = logging.getLogger(self.logname)
-
+        logname = list(log_dict.get('loggers').keys())[0]
+        self.log = logging.getLogger(logname)
         self.log.setLevel(self.verbosity_map[self.verbosity])
 
-        self.log.debug("Log files will be saved to %s", self.logdir)
+        self.log.debug("Log files will be saved to %s", logdir)
 
     def clean_exit(self):
         """
@@ -200,12 +203,15 @@ class SerialLogger:
         :return: Int exit_code. 0 = success, 1 = error.
         """
         try:
-            handle = serial.Serial(device, baudrate=self.baudrate, parity=self.parity, stopbits=self.stopbits,
-                                   bytesize=self.bytesize, timeout=1)
+            handle = serial.Serial(device, baudrate=self.c_serial['baudrate'], parity=self.c_serial['parity'],
+                                   stopbits=self.c_serial['stopbits'], bytesize=self.c_serial['bytesize'],
+                                   timeout=self.c_serial['timeout'])
             self.log.info("Opened serial handle on device:{device} baudrate:{baudrate}, parity:{parity}, "
-                          "stopbits:{stopbits}, bytesize:{bytesize}".format(device=device, baudrate=self.baudrate,
-                                                                            parity=self.parity, stopbits=self.stopbits,
-                                                                            bytesize=self.bytesize))
+                          "stopbits:{stopbits}, bytesize:{bytesize}".format(device=device,
+                                                                            baudrate=self.c_serial['baudrate'],
+                                                                            parity=self.c_serial['parity'],
+                                                                            stopbits=self.c_serial['stopbits'],
+                                                                            bytesize=self.c_serial['bytesize']))
         except serial.SerialException:
             self.log.exception('Exception encountered attempting to open serial comm port %s', device)
             return 1
@@ -216,6 +222,10 @@ class SerialLogger:
                     continue
                 if data is not None:
                     self.log.log(self.data_level, data)
+                    self.data_interval = time.time() - self.last_data
+                    self.last_data = time.time()
+                    self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
+                                                                                       time.gmtime(self.last_data))))
                     self.data_signal.set()
                     self.log.debug(data)
 
@@ -245,7 +255,10 @@ class SerialLogger:
             gpio.output(gpio_pin, False)
             time.sleep(duration)
 
-        outputs = [self.data_led, self.usb_led, self.aux_led]
+        data_l = self.c_signal['data_led']
+        usb_l = self.c_signal['usb_led']
+        aux_l = self.c_signal['aux_led']
+        outputs = [data_l, usb_l, aux_l]
         for pin in outputs:
             gpio.setup(pin, gpio.OUT)
             blink_led(pin)  # Test single blink on each LED
@@ -253,16 +266,16 @@ class SerialLogger:
         while not self.exit_signal.is_set():
             # USB signal takes precedence over data recording
             if self.usb_signal.is_set():
-                blink_led(self.usb_led, duration=.1)
+                blink_led(usb_l, duration=.1)
                 # Don't clear the signal, the transfer logic will clear when complete
             elif self.data_signal.is_set():
-                blink_led(self.data_led, duration=.1)
+                blink_led(data_l, duration=.1)
                 self.data_signal.clear()
 
             if self.err_signal.is_set():
-                gpio.output(self.aux_led, True)
+                gpio.output(aux_l, True)
             else:
-                gpio.output(self.aux_led, False)
+                gpio.output(aux_l, False)
 
         # Exiting: Turn off all outputs, then call cleanup()
         for pin in outputs:
@@ -281,7 +294,7 @@ class SerialLogger:
         """
         copy_list = []  # List of files to be copied to storage
         copy_size = 0  # Total size of logs in bytes
-        for log_file in glob.glob(os.path.join(self.logdir, pattern)):
+        for log_file in glob.glob(os.path.join(self.c_logging['logdir'], pattern)):
             copy_size += os.path.getsize(log_file)
             copy_list.append(log_file)
         self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
@@ -290,7 +303,7 @@ class SerialLogger:
             statvfs = os.statvfs(os.path.abspath(path))
             return statvfs.f_bsize * statvfs.f_bavail
 
-        if copy_size > get_freebytes(self.usbdev):
+        if copy_size > get_freebytes(dest):
             self.log.critical("USB Device does not have enough free space to copy logs")
             self.err_signal.set()
             return False
@@ -311,6 +324,11 @@ class SerialLogger:
                 self.log.exception("Exception encountered while copying log file.")
                 return False
 
+        # Create file with current system time as name
+        with open(os.path.join(dest_dir, 'ctime.txt'), 'w') as file:
+            file.write(time.strftime('%y-%m-%d %H:%M:%S', time.gmtime(time.time())))
+            file.flush()
+
         self.log.info("All logfiles in pattern %s copied successfully", pattern)
         return True
 
@@ -321,17 +339,18 @@ class SerialLogger:
         storage.
         :return: 
         """
+        device_path = self.c_usb['mount']
         while not self.exit_signal.is_set():
-            if not os.path.ismount(self.usbdev):
+            if not os.path.ismount(device_path):
                 pass
             else:
-                self.log.info("USB device detected at {}".format(self.usbdev))
+                self.log.info("USB device detected at {}".format(device_path))
                 self.usb_signal.set()
 
-                copied = self.copy_logs(self.usbdev, self.copy_level)
+                copied = self.copy_logs(device_path, self.copy_level)
                 if copied:
                     os.sync()
-                    dismounted = subprocess.run(['umount', self.usbdev])
+                    dismounted = subprocess.run(['umount', device_path])
                     self.log.info("Unmount operation returned with exit code: {}".format(dismounted))
                     time.sleep(1)
                     self.usb_signal.clear()
@@ -339,7 +358,7 @@ class SerialLogger:
                     self.log.info("Copy job failed, not retrying")
 
             # Finally:
-            time.sleep(self.usb_poll_interval)
+            time.sleep(self.c_usb['poll_int'])
 
     def run(self):
         self.threads = []

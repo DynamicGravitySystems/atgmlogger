@@ -1,0 +1,4 @@
+sudo apt-get install
+ntfs-3g
+exfat-fuse
+exfat-utils
