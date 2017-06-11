@@ -1,0 +1,15 @@
+sudo apt-get install
+ntfs-3g
+exfat-fuse
+exfat-utils
+
+
+# To download/cache the deb packages needed
+apt-get download PACKAGE && apt-cache depends -i PACKAGE | awk '/Depends:/ {print $2}' | xargs  apt-get download
+
+# if downloading from non arm(pi) system:
+dpkg --add-architecture armhf
+apt-get update
+apt-get download <package>:armhf
+# same format for apt-cache depends
+apt-cache depends -i <package>:armhf
