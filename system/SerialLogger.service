@@ -1,0 +1,11 @@
+[Unit]
+Description=DGS Serial Logger
+
+[Service]
+WorkingDirectory=/opt/SerialLogger
+Type=simple
+ExecStart=python3 /opt/SerialLogger/SerialLogger.py -vv
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

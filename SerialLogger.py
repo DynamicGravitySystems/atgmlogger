@@ -276,6 +276,7 @@ class SerialLogger:
                 gpio.output(aux_l, True)
             else:
                 gpio.output(aux_l, False)
+            time.sleep(.01)  # Rate limit the loop to cut down CPU hogging
 
         # Exiting: Turn off all outputs, then call cleanup()
         for pin in outputs:
