@@ -118,8 +118,8 @@ class SerialLogger:
         self.log.info("SerialLogger initialized.")
 
     @staticmethod
-    def set_verbosity(level, lvlmax=3):
-        if level is None:
+    def set_verbosity(level: int, lvlmax=3):
+        if level is None or level <= 0:
             return 0
         if level > lvlmax:
             return lvlmax
@@ -187,11 +187,13 @@ class SerialLogger:
     def decode(bytearr, encoding='utf-8'):
         if isinstance(bytearr, str):
             return bytearr
+
+        nonprintable = list(range(0, 32))
+        illegal = [255]
+        strip_chars = nonprintable + illegal  # Unprintable characters \x00 \xff
         try:
-            decoded = bytearr.decode(encoding).strip('\r\n')
-        except UnicodeDecodeError:
-            illegal = [0, 255]
-            decoded = bytes([x for x in bytearr if x not in illegal]).decode(encoding)
+            raw = bytes([c for c in bytearr if c not in strip_chars])
+            decoded = raw.decode(encoding, errors='ignore').strip('\r\n')
         except AttributeError:
             decoded = None
         return decoded
