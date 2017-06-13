@@ -310,7 +310,7 @@ class SerialLogger:
             statvfs = os.statvfs(os.path.abspath(path))
             return statvfs.f_bsize * statvfs.f_bavail
 
-        if copy_size > get_freebytes(dest):
+        if copy_size > get_freebytes(dest):  # TODO: We should attempt to copy whatever will fit
             self.log.critical("USB Device does not have enough free space to copy logs")
             self.err_signal.set()
             return False
