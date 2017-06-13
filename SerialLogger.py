@@ -83,6 +83,10 @@ class SerialLogger:
         self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
 
         # Logging definitions
+        if opts.logdir is None:
+            self.logdir = self.c_logging['logdir']
+        else:
+            self.logdir = opts.logdir
         self.logname = __name__
         self.log = None
         self.data_level = 60
@@ -132,7 +136,7 @@ class SerialLogger:
                 config_dict = yaml.load(config_raw)
         except Exception as e:
             print("Exception encountered loading configuration file, proceeding with defaults.")
-            print(e.__repr__())
+            # print(e.__repr__())
             config_dict = default_opts
         return config_dict
 
@@ -145,7 +149,7 @@ class SerialLogger:
         with open(config_f, 'r') as log_yaml:
             log_dict = yaml.load(log_yaml)
 
-        logdir = self.c_logging['logdir']
+        logdir = self.logdir
 
         # Apply base logdir to any filepaths in log_dict
         for hdlr, properties in log_dict.get('handlers').items():

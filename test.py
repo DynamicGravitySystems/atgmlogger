@@ -2,6 +2,8 @@ import unittest
 import SerialLogger
 import logging
 import yaml
+import shutil
+import sys
 
 
 class TestSerialLogger(unittest.TestCase):
@@ -9,6 +11,11 @@ class TestSerialLogger(unittest.TestCase):
     def setUp(self):
         # Link to but don't initialize SerialLogger class for convenience
         self.s = SerialLogger.SerialLogger
+        self.log_stream = logging.StreamHandler(stream=sys.stdout)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree('./logs')
 
     def test_level_filter(self):
         lvl_filter = SerialLogger.level_filter(60)
@@ -56,5 +63,10 @@ class TestSerialLogger(unittest.TestCase):
         self.assertIsInstance(result, str)
 
     def test_SerialLogger_init(self):
-        init = self.s(['test.py', '-vvv'])
+        init = self.s(['test.py', '-vvv', '--logdir=./logs'])
+
+        # Replace log handlers with Stream to sys.stdout for testing
+        init.log.handlers = self.log_stream
+
         self.assertEqual(init.verbosity, 3)
+        logging.shutdown()
