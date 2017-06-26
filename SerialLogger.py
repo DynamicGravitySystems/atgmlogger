@@ -12,11 +12,6 @@ import subprocess
 import uuid
 
 import serial
-try:
-    import RPi.GPIO as gpio
-except ImportError:
-    print("Raspberry PI GPIO Module is not available, LED signaling disabled.")
-    gpio = None
 
 
 def level_filter(level):
@@ -245,20 +240,23 @@ class SerialLogger:
         return 0
 
     def led_signaler(self):
-        if not gpio:
-            self.log.warning("GPIO Module is not available, LED signaling will not function.")
-            return 1
+        try:
+            import RPi.GPIO as GPIO
+        except ImportError:
+            self.log.warning("Raspberry PI GPIO Module is not available, LED signaling disabled.")
+            return 1  # Return and exit thread
+
         # Initialize Raspberry Pi GPIO pins
-        gpio.setwarnings(False)
-        gpio.setmode(gpio.BOARD)
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BOARD)
 
         def blink_led(gpio_pin, duration=.1):
             """Turn an output at pin on for duration, then off"""
             # Gets the current state of an output (not necessary currently)
             # state = gpio.input(pin)
-            gpio.output(gpio_pin, True)
+            GPIO.output(gpio_pin, True)
             time.sleep(duration)
-            gpio.output(gpio_pin, False)
+            GPIO.output(gpio_pin, False)
             time.sleep(duration)
 
         data_l = self.c_signal['data_led']
@@ -266,7 +264,7 @@ class SerialLogger:
         aux_l = self.c_signal['aux_led']
         outputs = [data_l, usb_l, aux_l]
         for pin in outputs:
-            gpio.setup(pin, gpio.OUT)
+            GPIO.setup(pin, GPIO.OUT)
             blink_led(pin)  # Test single blink on each LED
 
         while not self.exit_signal.is_set():
@@ -279,15 +277,15 @@ class SerialLogger:
                 self.data_signal.clear()
 
             if self.err_signal.is_set():
-                gpio.output(aux_l, True)
+                GPIO.output(aux_l, True)
             else:
-                gpio.output(aux_l, False)
+                GPIO.output(aux_l, False)
             time.sleep(.01)  # Rate limit the loop to cut down CPU hogging
 
         # Exiting: Turn off all outputs, then call cleanup()
         for pin in outputs:
-            gpio.output(pin, False)
-        gpio.cleanup()
+            GPIO.output(pin, False)
+        GPIO.cleanup()
         self.log.info("Led thread gracefully exited")
 
     def copy_logs(self, dest, pattern='*.dat*'):
