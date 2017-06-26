@@ -26,6 +26,114 @@ def level_filter(level):
     return _filter
 
 
+class USBHandler:
+
+    def __init__(self, source, dest, activity_signal, error_signal, poll_interval=1, log_facility=None,
+                 copy_level='data'):
+        copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
+
+        self.fsource = source
+        self.fdest = dest
+        self.err_signal = error_signal
+        self.act_signal = activity_signal
+        self.poll_int = poll_interval
+        self.log = log_facility
+        self.copy_pattern = copy_level_map[copy_level]
+
+    def copy_logs(self):
+        """
+        Copies application and data log files from self.logdir directory
+        to the specified 'dest' directory. Files to be copied can be speicifed
+        using a UNIX style glob pattern.
+        :param dest: Destination directory to copy logs to
+        :return: True if copy success, False if error
+        """
+        copy_list = []  # List of files to be copied to storage
+        copy_size = 0  # Total size of logs in bytes
+        for log_file in glob.glob(os.path.join(self.fsource, self.copy_pattern)):
+            copy_size += os.path.getsize(log_file)
+            copy_list.append(log_file)
+        self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
+
+        def get_freebytes(path):
+            statvfs = os.statvfs(os.path.abspath(path))
+            return statvfs.f_bsize * statvfs.f_bavail
+
+        if copy_size > get_freebytes(self.fdest):  # TODO: We should attempt to copy whatever will fit
+            self.log.critical("USB Device does not have enough free space to copy logs")
+            self.err_signal.set()
+            return False
+
+        # Else, copy the files:
+        dest_dir = os.path.abspath(os.path.join(self.fdest, str(uuid.uuid4())))
+        self.log.info("File Copy Job Destination: %s", dest_dir)
+        os.mkdir(dest_dir)
+
+        for src in copy_list:
+            _, fname = os.path.split(src)
+            try:
+                dest_file = os.path.join(dest_dir, fname)
+                shutil.copy(src, dest_file)
+                self.log.info("Copied file %s to %s", fname, dest_file)
+            except OSError:
+                self.err_signal.set()
+                self.log.exception("Exception encountered while copying log file.")
+                return False
+
+        diag = {'Total Copy Size': copy_size, 'Files Copied': copy_list, 'Destination Directory': dest_dir}
+        self.write_diag(dest_dir, 'Diagnostic Information', **diag)
+
+        self.log.info("All logfiles in pattern %s copied successfully", self.copy_pattern)
+        return True
+
+    @staticmethod
+    def write_diag(dest, timestamp=True, delim=':', *args, **kwargs):
+        """
+        Write diagnostic file to copy directory
+        :param dest:
+        :param timestamp:
+        :param delim:
+        :return: 0
+        """
+        with open(os.path.join(dest, 'diag.log'), 'w', encoding='utf-8') as fd:
+            if timestamp:
+                fd.write(time.strftime('%y-%m-%d %H:%M:%S', time.gmtime(time.time())) + "(GMT) \n")
+            for arg in args:
+                fd.write(repr(arg) + "\n")
+            for key, value in kwargs.items():
+                fd.write(repr(key) + delim + repr(value) + "\n")
+            fd.flush()
+        return 0
+
+    def poll(self):
+        """
+        Target function for usb transfer thread. This function polls for the presence of a filesystem at an arbitrary
+        mount point, and if it detects one it attempts to copy any relevant log/data files from the local SD card
+        storage.
+        :return:
+        """
+        device_path = self.fdest
+        while not self.exit_signal.is_set():
+            if not os.path.ismount(device_path):
+                pass
+            else:
+                self.log.info("USB device detected at {}".format(device_path))
+                self.act_signal.set()
+
+                copied = self.copy_logs(pattern=self.copy_level)
+                if copied:
+                    os.sync()
+                    dismounted = subprocess.run(['umount', device_path])
+                    self.log.info("Unmount operation returned with exit code: {}".format(dismounted))
+                    time.sleep(1)
+                    self.act_signal.clear()
+                else:
+                    self.log.info("Copy job failed, not retrying")
+
+            # Finally:
+            time.sleep(self.poll_int)
+
+
 class SerialLogger:
     def __init__(self, argv):
         parser = argparse.ArgumentParser(prog=argv[0],
@@ -288,83 +396,6 @@ class SerialLogger:
         GPIO.cleanup()
         self.log.info("Led thread gracefully exited")
 
-    def copy_logs(self, dest, pattern='*.dat*'):
-        """
-        Copies application and data log files from self.logdir directory
-        to the specified 'dest' directory. Files to be copied can be speicifed
-        using a UNIX style glob pattern.
-        :param dest: Destination directory to copy logs to
-        :param pattern: UNIX style glob to match log files for copy
-        :return: True if copy success, False if error
-        """
-        copy_list = []  # List of files to be copied to storage
-        copy_size = 0  # Total size of logs in bytes
-        for log_file in glob.glob(os.path.join(self.c_logging['logdir'], pattern)):
-            copy_size += os.path.getsize(log_file)
-            copy_list.append(log_file)
-        self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
-
-        def get_freebytes(path):
-            statvfs = os.statvfs(os.path.abspath(path))
-            return statvfs.f_bsize * statvfs.f_bavail
-
-        if copy_size > get_freebytes(dest):  # TODO: We should attempt to copy whatever will fit
-            self.log.critical("USB Device does not have enough free space to copy logs")
-            self.err_signal.set()
-            return False
-
-        # Else, copy the files:
-        dest_dir = os.path.abspath(os.path.join(dest, str(uuid.uuid4())))
-        self.log.info("File Copy Job Destination: %s", dest_dir)
-        os.mkdir(dest_dir)
-
-        for src in copy_list:
-            _, fname = os.path.split(src)
-            try:
-                dest_file = os.path.join(dest_dir, fname)
-                shutil.copy(src, dest_file)
-                self.log.info("Copied file %s to %s", fname, dest_file)
-            except OSError:
-                self.err_signal.set()
-                self.log.exception("Exception encountered while copying log file.")
-                return False
-
-        # Create file with current system time as name
-        with open(os.path.join(dest_dir, 'ctime.txt'), 'w') as file:
-            file.write(time.strftime('%y-%m-%d %H:%M:%S', time.gmtime(time.time())))
-            file.flush()
-
-        self.log.info("All logfiles in pattern %s copied successfully", pattern)
-        return True
-
-    def usb_utility(self):
-        """
-        Target function for usb transfer thread. This thread monitors for the presence of a filesystem at an arbitrary
-        mount point, and if it detects one it attempts to copy any relevant log/data files from the local SD card
-        storage.
-        :return: 
-        """
-        device_path = self.c_usb['mount']
-        while not self.exit_signal.is_set():
-            if not os.path.ismount(device_path):
-                pass
-            else:
-                self.log.info("USB device detected at {}".format(device_path))
-                self.usb_signal.set()
-
-                copied = self.copy_logs(device_path, self.copy_level)
-                if copied:
-                    os.sync()
-                    dismounted = subprocess.run(['umount', device_path])
-                    self.log.info("Unmount operation returned with exit code: {}".format(dismounted))
-                    time.sleep(1)
-                    self.usb_signal.clear()
-                else:
-                    self.log.info("Copy job failed, not retrying")
-
-            # Finally:
-            time.sleep(self.c_usb['poll_int'])
-
     def run(self):
         self.threads = []
 
@@ -373,7 +404,8 @@ class SerialLogger:
         led_thread.start()
         self.threads.append(led_thread)
 
-        usb_thread = threading.Thread(target=self.usb_utility, name='usbutility')
+        usb_handler = USBHandler(self.logdir, self.c_usb['mount'], self.err_signal, self.log)
+        usb_thread = threading.Thread(target=usb_handler.poll, name='usbutility')
         usb_thread.start()
         self.threads.append(usb_thread)
 
