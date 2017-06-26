@@ -1,15 +1,15 @@
 import os
 import sys
-import argparse
 import glob
 import time
+import uuid
 import yaml
+import shutil
 import logging
 import logging.config
+import argparse
 import threading
-import shutil
 import subprocess
-import uuid
 
 import serial
 
@@ -27,30 +27,47 @@ def level_filter(level):
 
 
 class USBHandler:
+    hooks = []
 
-    def __init__(self, source, dest, activity_signal, error_signal, poll_interval=1, log_facility=None,
+    def __init__(self, log_src, device_path, activity_signal, error_signal, poll_interval=1, log_facility=None,
                  copy_level='data'):
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
 
-        self.fsource = source
-        self.fdest = dest
+        self.log_dir = log_src
+        self.device = device_path
         self.err_signal = error_signal
         self.act_signal = activity_signal
         self.poll_int = poll_interval
         self.log = log_facility
         self.copy_pattern = copy_level_map[copy_level]
 
+    @classmethod
+    def register(cls, fcn):
+        cls.hooks.append(fcn)
+
+        def wrapper(*args, **kwargs):
+            return fcn(*args, **kwargs)
+        return wrapper
+
+    def list_files(self):
+        """List files on the device path, to check for anything we should take action on, e.g. config update"""
+        pass
+
+    def update_config(self, config_path):
+        """Copy new configuration file from USB and reload program configuration"""
+        pass
+
+    @register
     def copy_logs(self):
         """
         Copies application and data log files from self.logdir directory
         to the specified 'dest' directory. Files to be copied can be speicifed
         using a UNIX style glob pattern.
-        :param dest: Destination directory to copy logs to
-        :return: True if copy success, False if error
+        :return: 0 if copy success, 1 if error
         """
         copy_list = []  # List of files to be copied to storage
         copy_size = 0  # Total size of logs in bytes
-        for log_file in glob.glob(os.path.join(self.fsource, self.copy_pattern)):
+        for log_file in glob.glob(os.path.join(self.log_dir, self.copy_pattern)):
             copy_size += os.path.getsize(log_file)
             copy_list.append(log_file)
         self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
@@ -59,13 +76,13 @@ class USBHandler:
             statvfs = os.statvfs(os.path.abspath(path))
             return statvfs.f_bsize * statvfs.f_bavail
 
-        if copy_size > get_freebytes(self.fdest):  # TODO: We should attempt to copy whatever will fit
+        if copy_size > get_freebytes(self.device):  # TODO: We should attempt to copy whatever will fit
             self.log.critical("USB Device does not have enough free space to copy logs")
             self.err_signal.set()
-            return False
+            return 1
 
         # Else, copy the files:
-        dest_dir = os.path.abspath(os.path.join(self.fdest, str(uuid.uuid4())))
+        dest_dir = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
         self.log.info("File Copy Job Destination: %s", dest_dir)
         os.mkdir(dest_dir)
 
@@ -83,8 +100,8 @@ class USBHandler:
         diag = {'Total Copy Size': copy_size, 'Files Copied': copy_list, 'Destination Directory': dest_dir}
         self.write_diag(dest_dir, 'Diagnostic Information', **diag)
 
-        self.log.info("All logfiles in pattern %s copied successfully", self.copy_pattern)
-        return True
+        self.log.info("All log files in pattern %s copied successfully", self.copy_pattern)
+        return 0
 
     @staticmethod
     def write_diag(dest, timestamp=True, delim=':', *args, **kwargs):
@@ -112,26 +129,29 @@ class USBHandler:
         storage.
         :return:
         """
-        device_path = self.fdest
         while not self.exit_signal.is_set():
-            if not os.path.ismount(device_path):
-                pass
-            else:
-                self.log.info("USB device detected at {}".format(device_path))
-                self.act_signal.set()
+            time.sleep(self.poll_int)
+            if not os.path.ismount(self.device):
+                continue
 
-                copied = self.copy_logs(pattern=self.copy_level)
-                if copied:
-                    os.sync()
-                    dismounted = subprocess.run(['umount', device_path])
-                    self.log.info("Unmount operation returned with exit code: {}".format(dismounted))
-                    time.sleep(1)
-                    self.act_signal.clear()
-                else:
-                    self.log.info("Copy job failed, not retrying")
+            # Else: (Implicit)
+            self.log.info("USB device detected at {}".format(self.device))
+            self.act_signal.set()
+
+            """ TODO: working on adding all actionable functions to a list of hooks to be called on every loop
+             when a USB drive is connected. Hooks should not take any parameters, relying on instance vars, and
+             should return 0 for success or 1 for failure. """
+            exit_codes = []
+            for hook in USBHandler.hooks:
+                exit_code.append(hook())
+                os.sync()
+            code = max(exit_codes)
 
             # Finally:
-            time.sleep(self.poll_int)
+            umount = subprocess.run(['umount', self.device])
+            self.log.info("Unmount operation returned with exit code: {}".format(umount))
+            self.act_signal.clear()
+
 
 
 class SerialLogger:
@@ -226,6 +246,7 @@ class SerialLogger:
 
     @staticmethod
     def set_verbosity(level: int, lvlmax=3):
+        # Covered
         if level is None or level <= 0:
             return 0
         if level > lvlmax:
@@ -234,6 +255,7 @@ class SerialLogger:
 
     @staticmethod
     def load_config(config_path, default_opts=None):
+        # Covered
         try:
             with open(os.path.abspath(config_path), 'r') as config_raw:
                 config_dict = yaml.load(config_raw)
