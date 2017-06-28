@@ -8,6 +8,7 @@ import shutil
 import logging
 import logging.config
 import argparse
+import functools
 import threading
 import subprocess
 
@@ -26,101 +27,174 @@ def level_filter(level):
     return _filter
 
 
-class USBHandler:
-    hooks = []
-
+class RemovableStorageHandler:
     def __init__(self, log_src, device_path, activity_signal, error_signal, poll_interval=1, log_facility=None,
-                 copy_level='data'):
+                 copy_level='all', verbosity=0):
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
 
+        self.hooks = []
+        # Inspect class for functions with attribute 'hooks' and append to hook list
+        for member in self.__class__.__dict__.values():
+            if hasattr(member, 'hook') and getattr(member, 'hook', False):
+                self.hooks.append(member)
+
+        self.file_hooks = {
+            'dgsdiag': self.run_diag,
+            'config.yaml': lambda: None,
+            'logging.yaml': lambda: None
+        }
+
+        # Assignments
         self.log_dir = log_src
         self.device = device_path
         self.err_signal = error_signal
         self.act_signal = activity_signal
         self.poll_int = poll_interval
         self.log = log_facility
+        if self.log is None:
+            self.log = logging.getLogger(__name__)
+            self.log.setLevel(logging.DEBUG)
+            self.log.addHandler(logging.StreamHandler(sys.stdout))
+        self.verbosity = verbosity
+
+        # Instance Fields
+        self.datetime_fmt = '%y-%m-%d %H:%M:%S'
         self.copy_pattern = copy_level_map[copy_level]
+        self.last_copy_path = ''
+        self.last_copy_time = 0
+        self.last_copy_stats = {}
 
-    @classmethod
-    def register(cls, fcn):
-        cls.hooks.append(fcn)
+        self.log.info('USBHandler Initialized')
 
+    def _register(func):
+        @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            return fcn(*args, **kwargs)
+            return func(*args, **kwargs)
+        wrapper.hook = True
         return wrapper
 
-    def list_files(self):
+    def watch_files(self):
         """List files on the device path, to check for anything we should take action on, e.g. config update"""
-        pass
+        file_hooks = {
+            'dgsdiag': self.run_diag,
+            'config.yaml': lambda: None,
+            'logging.yaml': lambda: None
+        }
+        root_files = os.scandir(self.device)
+        for file in root_files:
+            if not file.is_file():
+                continue
+            if file.name in file_hooks.keys():
+                print('File Watch Match on file: {}'.format(file.name))
+                print('Will Execute: {}'.format(file_hooks[file.name]))
 
+    @_register
     def update_config(self, config_path):
         """Copy new configuration file from USB and reload program configuration"""
+        if 'config.yml' in self.list_files():
+            print("attempting to update config")
         pass
 
-    @register
+    def get_dest_dir(self, scheme=None, prefix=None, datefmt='%y%m%d-%H%M.%S'):
+
+        if scheme == 'uuid':
+            dir_name = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
+        else:
+            dir_name = time.strftime(datefmt+'UTC', time.gmtime(time.time()))
+
+        if prefix:
+            dir_name = prefix+dir_name
+
+        illegals = '\\:<>?*/\"'  # Illegal filename characters
+        dir_name = "".join([c for c in dir_name if c not in illegals])
+        return os.path.abspath(os.path.join(self.device, dir_name))
+
+    @_register
     def copy_logs(self):
         """
-        Copies application and data log files from self.logdir directory
-        to the specified 'dest' directory. Files to be copied can be speicifed
-        using a UNIX style glob pattern.
         :return: 0 if copy success, 1 if error
         """
-        copy_list = []  # List of files to be copied to storage
-        copy_size = 0  # Total size of logs in bytes
+        file_list = []  # List of files to be copied to storage
+        copy_size = 0   # Accumulated size of logs in bytes
         for log_file in glob.glob(os.path.join(self.log_dir, self.copy_pattern)):
             copy_size += os.path.getsize(log_file)
-            copy_list.append(log_file)
+            file_list.append(os.path.normpath(log_file))
         self.log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
 
-        def get_freebytes(path):
-            statvfs = os.statvfs(os.path.abspath(path))
+        def get_free(path):
+            try:
+                statvfs = os.statvfs(os.path.abspath(path))
+            except AttributeError:
+                return 1000000000
             return statvfs.f_bsize * statvfs.f_bavail
 
-        if copy_size > get_freebytes(self.device):  # TODO: We should attempt to copy whatever will fit
+        if copy_size > get_free(self.device):  # TODO: We should attempt to copy whatever will fit
             self.log.critical("USB Device does not have enough free space to copy logs")
             self.err_signal.set()
             return 1
 
         # Else, copy the files:
-        dest_dir = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
+        dest_dir = self.get_dest_dir()
         self.log.info("File Copy Job Destination: %s", dest_dir)
         os.mkdir(dest_dir)
 
-        for src in copy_list:
-            _, fname = os.path.split(src)
+        for src in file_list:
+            _, file = os.path.split(src)
             try:
-                dest_file = os.path.join(dest_dir, fname)
+                dest_file = os.path.join(dest_dir, file)
                 shutil.copy(src, dest_file)
-                self.log.info("Copied file %s to %s", fname, dest_file)
+                self.log.info("Copied file %s to %s", file, dest_file)
             except OSError:
                 self.err_signal.set()
                 self.log.exception("Exception encountered while copying log file.")
-                return False
+                return 1
 
-        diag = {'Total Copy Size': copy_size, 'Files Copied': copy_list, 'Destination Directory': dest_dir}
-        self.write_diag(dest_dir, 'Diagnostic Information', **diag)
-
+        self.last_copy_path = dest_dir
+        self.last_copy_time = time.time()
+        self.last_copy_stats = {'Total Copy Size (KiB)': copy_size, 'Files Copied': file_list,
+                                'Destination Directory': dest_dir, 'Last Copy Time': self.last_copy_time}
         self.log.info("All log files in pattern %s copied successfully", self.copy_pattern)
         return 0
 
     @staticmethod
-    def write_diag(dest, timestamp=True, delim=':', *args, **kwargs):
-        """
-        Write diagnostic file to copy directory
-        :param dest:
-        :param timestamp:
-        :param delim:
-        :return: 0
-        """
-        with open(os.path.join(dest, 'diag.log'), 'w', encoding='utf-8') as fd:
-            if timestamp:
-                fd.write(time.strftime('%y-%m-%d %H:%M:%S', time.gmtime(time.time())) + "(GMT) \n")
-            for arg in args:
-                fd.write(repr(arg) + "\n")
-            for key, value in kwargs.items():
-                fd.write(repr(key) + delim + repr(value) + "\n")
-            fd.flush()
-        return 0
+    def write(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
+        """Write or append arbitrary data to specified dest file."""
+        mode = {True: 'w+', False: 'w'}[append]
+        lines = []
+        for val in args:
+            lines.append(str(val).strip('\'\"'))
+        for key, val in kwargs.items():
+            line = "".join([str(key), delim, str(val)]).strip('\'\"')
+            lines.append(line)
+
+        try:
+            with open(os.path.abspath(dest), mode, encoding=encoding) as fd:
+                for line in lines:
+                    fd.write(line + eol)
+                fd.flush()
+        except OSError:
+            print("Encountered OSError during write operation")
+            return 1
+        else:
+            return 0
+
+    def run_diag(self):
+        diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
+        diag = {}
+        for cmd in diag_cmds:
+            try:
+                output = subprocess.check_output(cmd.split(' ')).decode('utf-8')
+                diag[cmd] = output
+            except FileNotFoundError:
+                self.log.warning('Command: {} not available on this system.'.format(cmd))
+
+        if self.verbosity > 2:
+            cpuinfo = ''
+            with open('/proc/cpuinfo', 'r') as fd:
+                cpuinfo = fd.read()
+            diag['CPU Info'] = cpuinfo
+
+        return diag
 
     def poll(self):
         """
@@ -135,23 +209,28 @@ class USBHandler:
                 continue
 
             # Else: (Implicit)
-            self.log.info("USB device detected at {}".format(self.device))
+            self.log.info("USB device mounted at {}".format(self.device))
             self.act_signal.set()
+
+            self.watch_files()
 
             """ TODO: working on adding all actionable functions to a list of hooks to be called on every loop
              when a USB drive is connected. Hooks should not take any parameters, relying on instance vars, and
              should return 0 for success or 1 for failure. """
             exit_codes = []
-            for hook in USBHandler.hooks:
-                exit_code.append(hook())
+            for hook in RemovableStorageHandler.hooks:
+                exit_codes.append(hook())
                 os.sync()
-            code = max(exit_codes)
 
+            # Write Diagnostics Log
+            if self.verbosity > 1:
+                self.write(os.path.join(self.last_copy_path, 'diag.txt'),
+                           time.strftime(self.datetime_fmt, time.gmtime(self.last_copy_time)),
+                           **self.last_copy_stats, **self.run_diag())
             # Finally:
             umount = subprocess.run(['umount', self.device])
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
             self.act_signal.clear()
-
 
 
 class SerialLogger:
@@ -192,9 +271,6 @@ class SerialLogger:
             }
         }
 
-        # Deprecated - remove when dependencies resolved
-        self.config = self.load_config(opts.configuration, defaults)
-
         config = self.load_config(opts.configuration, defaults)
         # Config sub subleafs
         self.c_usb = config.get('usb', defaults['usb'])
@@ -223,16 +299,16 @@ class SerialLogger:
         self.data_signal = threading.Event()
         self.usb_signal = threading.Event()
         self.err_signal = threading.Event()
+        self.reload_signal = threading.Event()
 
         # Serial Port Settings
         if opts.device is None:
-            self.device = self.config['serial']['device']
+            self.device = self.c_serial['device']
         else:
             self.device = opts.device
 
         # USB Mount Path
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
-        # self.usbdev = self.config['usb']['mount']
         self.copy_level = copy_level_map[self.c_usb['copy_level']]
 
         # Thread List Object
@@ -260,7 +336,7 @@ class SerialLogger:
             with open(os.path.abspath(config_path), 'r') as config_raw:
                 config_dict = yaml.load(config_raw)
         except Exception as e:
-            print("Exception encountered loading configuration file, proceeding with defaults.")
+            # print("Exception encountered loading configuration file, proceeding with defaults.")
             # print(e.__repr__())
             config_dict = default_opts
         return config_dict
@@ -292,9 +368,7 @@ class SerialLogger:
         # Apply configuration from imported YAML Dict
         logging.config.dictConfig(log_dict)
 
-        # Select only the first logger defined in the log yaml
-        logname = list(log_dict.get('loggers').keys())[0]
-        self.log = logging.getLogger(logname)
+        self.log = logging.getLogger()
         self.log.setLevel(self.verbosity_map[self.verbosity])
 
         self.log.debug("Log files will be saved to %s", logdir)
@@ -426,13 +500,27 @@ class SerialLogger:
         led_thread.start()
         self.threads.append(led_thread)
 
-        usb_handler = USBHandler(self.logdir, self.c_usb['mount'], self.err_signal, self.log)
-        usb_thread = threading.Thread(target=usb_handler.poll, name='usbutility')
+        usb_handler_opts = {
+            'log_src': self.logdir,
+            'device_path': self.c_usb['mount'],
+            'activity_signal': self.usb_signal,
+            'error_signal': self.err_signal,
+            'log_facility': self.log,
+            'copy_level': self.c_usb['copy_level'],
+            'verbosity': self.verbosity
+        }
+
+        usb_handler = RemovableStorageHandler(**usb_handler_opts)
+        usb_thread = threading.Thread(target=usb_handler.poll, name='usb_handler')
         usb_thread.start()
         self.threads.append(usb_thread)
 
         self.log.debug("Entering main loop.")
         while not self.exit_signal.is_set():
+            if self.reload_signal.is_set():
+                self.init_logging()
+                self.reload_signal.clear()
+
             # Filter out dead threads
             self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
             if self.device not in [t.name for t in self.threads]:
