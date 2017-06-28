@@ -5,16 +5,14 @@ import yaml
 import shutil
 import sys
 import os
-import glob
 
 
 class TestSerialLogger(unittest.TestCase):
     def setUp(self):
         self.sl = SerialLogger.SerialLogger
-        self.slargs = ['test.py', '-vvv', '--logdir=./logs']
-        self.log = logging.getLogger(__name__)
-        self.log.setLevel(logging.DEBUG)
-        self.log_stream = logging.StreamHandler(stream=sys.stdout)
+        self.sl_args = ['test.py', '-vvv', '--logdir=./logs']
+        self.rsh = SerialLogger.RemovableStorageHandler
+        self.rsh_args = []
 
     @classmethod
     def tearDownClass(cls):
@@ -42,7 +40,7 @@ class TestSerialLogger(unittest.TestCase):
         self.assertEqual(result, 0)
 
     def test_load_config(self):
-        "Test static method load_config()"
+        """Test static method load_config()"""
         config = 'logging.yaml'
         with open(config, 'r') as source:
             src_yaml = yaml.load(source)
@@ -60,7 +58,7 @@ class TestSerialLogger(unittest.TestCase):
         self.assertEqual(test_defaults['usb']['poll_int'], 3)
 
     def test_decode(self):
-        "Test static method decode()"
+        """Test static method decode()"""
         raw_data = bytes('abcd!%*\t\r\n', encoding='latin_1')
         raw_data += bytes(chr(255), encoding='latin_1')
         raw_data += bytes(chr(0), encoding='latin_1')
@@ -70,33 +68,27 @@ class TestSerialLogger(unittest.TestCase):
         self.assertIsInstance(result, str)
 
     def test_SerialLogger_init(self):
-        sli = self.sl(self.slargs)
-        # Replace log handlers with Stream to sys.stdout for testing
-        orig_handlers = sli.log.handlers
-        for hdl in orig_handlers:
-            hdl.close()
-        # init.log.handlers = self.log_stream
-        self.assertEqual(sli.verbosity, 3)
+        inst = SerialLogger.SerialLogger(self.sl_args)
+        self.assertEqual('./logs', inst.logdir)
 
-        # Reset logging handlers back to original
-        sli.log.handlers = orig_handlers
+
 
     def test_init_logging(self):
 
         pass
 
-    def test_usb_handler(self):
+    def test_RSH_copy_logs(self):
         paths = './logs', './device'
         for path in paths:
             if not os.path.exists(path):
                 os.mkdir(path)
-        u = SerialLogger.RemovableStorageHandler(*paths, None, None, log_facility=self.log, verbosity=3)
+        u = self.rsh(*paths, None, None, verbosity=3)
         u.copy_logs()
 
     def test_write(self):
-        write = SerialLogger.RemovableStorageHandler.write
+        """Test RemovableStorageHandler static Write utility"""
+        write = self.rsh.write
         dest = './device/test_write.txt'
-        lines = ['THIS IS A TEST', 'THIS IS THE second LINE']
         write(dest, 'hello this is line 1', 'this is line 2', customkey='blargl')
         with open(dest, 'r') as fd:
             self.assertEqual(fd.readline(), 'hello this is line 1\n')
@@ -108,15 +100,18 @@ class TestSerialLogger(unittest.TestCase):
         inst = SerialLogger.RemovableStorageHandler('.', '.', None, None, verbosity=3)
         inst.run_diag()
 
-    def test_check_files(self):
+    def test_watch_files(self):
         if not os.path.exists('./device'):
             os.mkdir('./device')
-        rsh = SerialLogger.RemovableStorageHandler('.', './device', None, None, verbosity=3, log_facility=self.log)
-        triggers = ['config.yaml', 'logging.yaml', 'dgsdiag', 'dgsdiag.txt']
+        with self.assertLogs(level=logging.INFO) as al:
+            rsh = SerialLogger.RemovableStorageHandler('.', './device', None, None, verbosity=3)
+            self.assertEqual(al.output, ['INFO:root:RemovableStorageHandler Initialized'])
+
+        triggers = ['logging.yml', 'dgsdiag', 'dgsdiag.txt', 'false_trigger']
+        # Generate trigger files to test
         for trigger in triggers:
             with open(os.path.join('./device', trigger), 'w') as fd:
                 fd.write('')
                 fd.flush()
-        rsh.watch_files()
-
+        res = rsh.watch_files()
 

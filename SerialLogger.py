@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import glob
 import time
@@ -27,34 +28,46 @@ def level_filter(level):
     return _filter
 
 
-class RemovableStorageHandler:
-    def __init__(self, log_src, device_path, activity_signal, error_signal, poll_interval=1, log_facility=None,
+def _runhook(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    wrapper.runhook = True
+    return wrapper
+
+
+def _filehook(pattern):
+    def inner(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        wrapper.filehook = pattern
+        return wrapper
+    return inner
+
+
+class RemovableStorageHandler(threading.Thread):
+    def __init__(self, logdir, mount_path, activity_signal, error_signal, poll_interval=1,
                  copy_level='all', verbosity=0):
+        super(RemovableStorageHandler, self).__init__(name='RemovableStorageHandler')
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
 
-        self.hooks = []
-        # Inspect class for functions with attribute 'hooks' and append to hook list
+        self.run_hooks = []
+        self.file_hooks = {}
+        # Inspect class for functions with attribute runhook/filehook and append to respective hook list
         for member in self.__class__.__dict__.values():
-            if hasattr(member, 'hook') and getattr(member, 'hook', False):
-                self.hooks.append(member)
-
-        self.file_hooks = {
-            'dgsdiag': self.run_diag,
-            'config.yaml': lambda: None,
-            'logging.yaml': lambda: None
-        }
+            if hasattr(member, 'runhook'):
+                self.run_hooks.append(functools.partial(member, self))
+            elif hasattr(member, 'filehook'):
+                self.file_hooks[getattr(member, 'filehook')] = functools.partial(member, self)
 
         # Assignments
-        self.log_dir = log_src
-        self.device = device_path
+        self.log_dir = logdir
+        self.device = mount_path
         self.err_signal = error_signal
         self.act_signal = activity_signal
         self.poll_int = poll_interval
-        self.log = log_facility
-        if self.log is None:
-            self.log = logging.getLogger(__name__)
-            self.log.setLevel(logging.DEBUG)
-            self.log.addHandler(logging.StreamHandler(sys.stdout))
+        self.log = logging.getLogger()
         self.verbosity = verbosity
 
         # Instance Fields
@@ -64,44 +77,42 @@ class RemovableStorageHandler:
         self.last_copy_time = 0
         self.last_copy_stats = {}
 
-        self.log.info('USBHandler Initialized')
+        if self.verbosity > 1:
+            self.log.info('{} Initialized'.format(self.__class__.__name__))
 
-    def _register(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-        wrapper.hook = True
-        return wrapper
+    @staticmethod
+    def write(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
+        """Write or append arbitrary data to specified dest file."""
+        mode = {True: 'w+', False: 'w'}[append]
+        lines = []
+        for val in args:
+            lines.append(str(val).strip('\'\"'))
+        for key, val in kwargs.items():
+            line = "".join([str(key), delim, str(val)]).strip('\'\"')
+            lines.append(line)
 
-    def watch_files(self):
-        """List files on the device path, to check for anything we should take action on, e.g. config update"""
-        file_hooks = {
-            'dgsdiag': self.run_diag,
-            'config.yaml': lambda: None,
-            'logging.yaml': lambda: None
-        }
-        root_files = os.scandir(self.device)
-        for file in root_files:
-            if not file.is_file():
-                continue
-            if file.name in file_hooks.keys():
-                print('File Watch Match on file: {}'.format(file.name))
-                print('Will Execute: {}'.format(file_hooks[file.name]))
-
-    @_register
-    def update_config(self, config_path):
-        """Copy new configuration file from USB and reload program configuration"""
-        if 'config.yml' in self.list_files():
-            print("attempting to update config")
-        pass
+        try:
+            with open(os.path.abspath(dest), mode, encoding=encoding) as fd:
+                for line in lines:
+                    fd.write(line + eol)
+                fd.flush()
+        except OSError:
+            print("Encountered OSError during write operation")
+            return 1
+        else:
+            return 0
 
     def get_dest_dir(self, scheme=None, prefix=None, datefmt='%y%m%d-%H%M.%S'):
+        """Generate and return unique path under self.device path to copy files.
+        :param scheme: If uuid generate directory from uuid4(). Default: use current UTC time
+        :param prefix: Optionally prepend a prefix to the directory name
+        :param datefmt: Datetime string format used to name directory under default scheme
+        """
 
         if scheme == 'uuid':
             dir_name = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
         else:
             dir_name = time.strftime(datefmt+'UTC', time.gmtime(time.time()))
-
         if prefix:
             dir_name = prefix+dir_name
 
@@ -109,7 +120,40 @@ class RemovableStorageHandler:
         dir_name = "".join([c for c in dir_name if c not in illegals])
         return os.path.abspath(os.path.join(self.device, dir_name))
 
-    @_register
+    @_filehook(r'(dgs)?diag(nostics)?\.?(txt|trigger|dat)?')
+    def run_diag(self, *args, **kwargs):
+        diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
+        diag = {}
+        timestamp = time.strftime(self.datetime_fmt, time.gmtime(time.time()))
+        for cmd in diag_cmds:
+            try:
+                output = subprocess.check_output(cmd.split(' ')).decode('utf-8')
+                diag[cmd] = output
+            except FileNotFoundError:
+                self.log.warning('Command: {} not available on this system.'.format(cmd))
+                continue
+
+        if self.verbosity > 2:
+            try:
+                with open('/proc/cpuinfo', 'r') as fd:
+                    cpuinfo = fd.read()
+                diag['CPU Info'] = cpuinfo
+            except FileNotFoundError:
+                self.log.warning('/proc/cpuinfo not available on this system.')
+        path = kwargs.get('dest', self.device)
+        self.write(os.path.join(path, 'diag.txt'), timestamp, **diag)
+
+    @_filehook(r'config.ya?ml')
+    def update_config(self, *args):
+        """Copy new configuration file from USB and reload program configuration"""
+        print("Performing config update")
+
+    @_filehook(r'log(ging)?.ya?ml')
+    def update_log_config(self, *args):
+        """Copy new configuration file from USB and reload logging configuration"""
+        print("Performing logging config update")
+
+    @_runhook
     def copy_logs(self):
         """
         :return: 0 if copy success, 1 if error
@@ -156,47 +200,18 @@ class RemovableStorageHandler:
         self.log.info("All log files in pattern %s copied successfully", self.copy_pattern)
         return 0
 
-    @staticmethod
-    def write(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
-        """Write or append arbitrary data to specified dest file."""
-        mode = {True: 'w+', False: 'w'}[append]
-        lines = []
-        for val in args:
-            lines.append(str(val).strip('\'\"'))
-        for key, val in kwargs.items():
-            line = "".join([str(key), delim, str(val)]).strip('\'\"')
-            lines.append(line)
+    @_runhook
+    def watch_files(self):
+        """List files on the device path, to check for anything we should take action on, e.g. config update"""
+        root_files = [file.name for file in os.scandir(self.device) if file.is_file()]
+        flist = " ".join(root_files)
+        for pattern in self.file_hooks:
+            match = re.search(pattern, flist)
+            if match:
+                self.log.info("Trigger file matched: {}".format(match.group()))
+                self.file_hooks[pattern](match.group(), self.last_copy_path)
 
-        try:
-            with open(os.path.abspath(dest), mode, encoding=encoding) as fd:
-                for line in lines:
-                    fd.write(line + eol)
-                fd.flush()
-        except OSError:
-            print("Encountered OSError during write operation")
-            return 1
-        else:
-            return 0
-
-    def run_diag(self):
-        diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
-        diag = {}
-        for cmd in diag_cmds:
-            try:
-                output = subprocess.check_output(cmd.split(' ')).decode('utf-8')
-                diag[cmd] = output
-            except FileNotFoundError:
-                self.log.warning('Command: {} not available on this system.'.format(cmd))
-
-        if self.verbosity > 2:
-            cpuinfo = ''
-            with open('/proc/cpuinfo', 'r') as fd:
-                cpuinfo = fd.read()
-            diag['CPU Info'] = cpuinfo
-
-        return diag
-
-    def poll(self):
+    def run(self):
         """
         Target function for usb transfer thread. This function polls for the presence of a filesystem at an arbitrary
         mount point, and if it detects one it attempts to copy any relevant log/data files from the local SD card
@@ -208,25 +223,15 @@ class RemovableStorageHandler:
             if not os.path.ismount(self.device):
                 continue
 
-            # Else: (Implicit)
-            self.log.info("USB device mounted at {}".format(self.device))
+            # Else:
+            self.log.info("USB device detected at {}".format(self.device))
             self.act_signal.set()
 
-            self.watch_files()
-
-            """ TODO: working on adding all actionable functions to a list of hooks to be called on every loop
-             when a USB drive is connected. Hooks should not take any parameters, relying on instance vars, and
-             should return 0 for success or 1 for failure. """
             exit_codes = []
-            for hook in RemovableStorageHandler.hooks:
-                exit_codes.append(hook())
-                os.sync()
+            for run_hook in self.run_hooks:
+                exit_codes.append(run_hook())
+            os.sync()
 
-            # Write Diagnostics Log
-            if self.verbosity > 1:
-                self.write(os.path.join(self.last_copy_path, 'diag.txt'),
-                           time.strftime(self.datetime_fmt, time.gmtime(self.last_copy_time)),
-                           **self.last_copy_stats, **self.run_diag())
             # Finally:
             umount = subprocess.run(['umount', self.device])
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
@@ -286,7 +291,6 @@ class SerialLogger:
             self.logdir = self.c_logging['logdir']
         else:
             self.logdir = opts.logdir
-        self.logname = __name__
         self.log = None
         self.data_level = 60
         self.verbosity = self.set_verbosity(opts.verbose)
@@ -317,8 +321,6 @@ class SerialLogger:
         # Statistics tracking
         self.last_data = 0
         self.data_interval = 0
-
-        self.log.info("SerialLogger initialized.")
 
     @staticmethod
     def set_verbosity(level: int, lvlmax=3):
@@ -371,7 +373,8 @@ class SerialLogger:
         self.log = logging.getLogger()
         self.log.setLevel(self.verbosity_map[self.verbosity])
 
-        self.log.debug("Log files will be saved to %s", logdir)
+        if self.verbosity > 2:
+            self.log.debug("Log files will be saved to %s", logdir)
 
     def clean_exit(self):
         """
@@ -505,15 +508,13 @@ class SerialLogger:
             'device_path': self.c_usb['mount'],
             'activity_signal': self.usb_signal,
             'error_signal': self.err_signal,
-            'log_facility': self.log,
             'copy_level': self.c_usb['copy_level'],
             'verbosity': self.verbosity
         }
 
         usb_handler = RemovableStorageHandler(**usb_handler_opts)
-        usb_thread = threading.Thread(target=usb_handler.poll, name='usb_handler')
-        usb_thread.start()
-        self.threads.append(usb_thread)
+        usb_handler.start()
+        self.threads.append(usb_handler)
 
         self.log.debug("Entering main loop.")
         while not self.exit_signal.is_set():
