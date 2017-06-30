@@ -5,7 +5,10 @@ import glob
 import time
 import uuid
 import yaml
+import shlex
 import shutil
+import zipfile
+import tarfile
 import logging
 import logging.config
 import argparse
@@ -120,38 +123,105 @@ class RemovableStorageHandler(threading.Thread):
         dir_name = "".join([c for c in dir_name if c not in illegals])
         return os.path.abspath(os.path.join(self.device, dir_name))
 
+    def _copy_file(self, src, dest, force=True):
+        if not force and os.path.exists(dest):
+            return None
+        try:
+            return shutil.copy(src, dest)
+        except OSError:
+            self.log.exception("Error copying file %s", src)
+            return None
+
+    @staticmethod
+    def _compress(path, *args, method=None, compression=None):
+        log = logging.getLogger()
+        if method is None or method not in ['zip', 'tar']:
+            method = 'zip'
+
+        ext = {'zip': '.zip', 'tar': '.tar'}
+        tar_ext = {'lzma': '.lz', 'gzip': '.gz', 'bzip': '.bz2'}
+        if os.path.isdir(path):
+            # If the provided path is a directory create unique zipfile name
+            arcname = str(uuid.uuid4())[:13] + ext[method]
+            path = os.path.abspath(os.path.join(path, arcname))
+
+        cmp_modes = {'zip': {None: zipfile.ZIP_STORED, 'lzma': zipfile.ZIP_LZMA, 'bzip': zipfile.ZIP_BZIP2,
+                             'zlib': zipfile.ZIP_DEFLATED},
+                     'tar': {None: '', 'lzma': 'xz', 'gzip': 'gz', 'bzip': 'bz2', 'bzip2': 'bz2'}
+                     }
+        if compression and compression not in cmp_modes[method].keys():
+            log.warning("Invalid compression method: '{}' defaulting to None for target: {}".format(compression, path))
+            compression = None
+
+        inputs = []
+        for file in args:
+            if os.path.exists(file) and os.path.isfile(file):
+                inputs.append(os.path.abspath(file))
+
+        if method == 'zip':
+            try:
+                with zipfile.ZipFile(path, mode="w", compression=cmp_modes[method][compression]) as zf:
+                    for file in inputs:
+                        zf.write(os.path.abspath(file), arcname=os.path.basename(file))
+            except FileExistsError:
+                log.exception("Zipfile already exists")
+                return None
+        elif method == 'tar':
+            if compression:
+                path += tar_ext[compression]
+                mode = 'x:' + cmp_modes[method][compression]
+            else:
+                mode = 'x'
+            try:
+                tf = tarfile.open(path, mode=mode)
+                for file in inputs:
+                    tf.add(file, arcname=os.path.basename(file))
+            except FileExistsError:
+                log.exception("Tarfile already exists")
+            finally:
+                tf.close()
+        return path
+
     @_filehook(r'(dgs)?diag(nostics)?\.?(txt|trigger|dat)?')
     def run_diag(self, *args, **kwargs):
+        """
+        Execute series of diagnostic commands and return dictionary of results in form dict[cmd] = result
+        :param args: For compatability with hook call
+        :param kwargs: For compatability with hook call
+        :return: Dict. of diagnostic commands = results
+        """
         diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
-        diag = {}
-        timestamp = time.strftime(self.datetime_fmt, time.gmtime(time.time()))
+        diag = {'Diagnostic Timestamp': time.strftime(self.datetime_fmt, time.gmtime(time.time()))}
         for cmd in diag_cmds:
             try:
-                output = subprocess.check_output(cmd.split(' ')).decode('utf-8')
+                output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
                 diag[cmd] = output
             except FileNotFoundError:
                 self.log.warning('Command: {} not available on this system.'.format(cmd))
                 continue
 
         if self.verbosity > 2:
+            proc_cpuinfo = '/proc/cpuinfo'
             try:
-                with open('/proc/cpuinfo', 'r') as fd:
+                with open(proc_cpuinfo, 'r') as fd:
                     cpuinfo = fd.read()
-                diag['CPU Info'] = cpuinfo
+                diag[proc_cpuinfo] = cpuinfo
             except FileNotFoundError:
-                self.log.warning('/proc/cpuinfo not available on this system.')
-        path = kwargs.get('dest', self.device)
-        self.write(os.path.join(path, 'diag.txt'), timestamp, **diag)
+                self.log.warning('{} not available on this system.'.format(proc_cpuinfo))
+
+        return diag
 
     @_filehook(r'config.ya?ml')
     def update_config(self, *args):
         """Copy new configuration file from USB and reload program configuration"""
         print("Performing config update")
+        raise NotImplementedError
 
     @_filehook(r'log(ging)?.ya?ml')
     def update_log_config(self, *args):
         """Copy new configuration file from USB and reload logging configuration"""
         print("Performing logging config update")
+        raise NotImplementedError
 
     @_runhook
     def copy_logs(self):

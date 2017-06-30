@@ -1,10 +1,14 @@
 import unittest
 import SerialLogger
 import logging
+import tempfile
 import yaml
+import uuid
 import shutil
 import sys
 import os
+import zipfile
+import tarfile
 
 
 class TestSerialLogger(unittest.TestCase):
@@ -13,6 +17,7 @@ class TestSerialLogger(unittest.TestCase):
         self.sl_args = ['test.py', '-vvv', '--logdir=./logs']
         self.rsh = SerialLogger.RemovableStorageHandler
         self.rsh_args = []
+        self.basedir = os.getcwd()
 
     @classmethod
     def tearDownClass(cls):
@@ -113,5 +118,44 @@ class TestSerialLogger(unittest.TestCase):
             with open(os.path.join('./device', trigger), 'w') as fd:
                 fd.write('')
                 fd.flush()
-        res = rsh.watch_files()
+        try:
+            # Suppress expected logging on windows
+            if sys.platform.startswith('win'):
+                with self.assertLogs(level=logging.INFO):
+                    res = rsh.watch_files()
+            else:
+                res = rsh.watch_files()
+        except NotImplementedError:
+            print("Function not implemented in watch_files")
+
+    def test_compress_files(self):
+        # Test zipfile creation
+        with tempfile.TemporaryDirectory() as temp:
+            for i in range(5):
+                fd = open(os.path.join(temp, str(uuid.uuid4()) + '.ext'), 'w')
+                fd.write('Contents of file ' + str(i))
+                fd.close()
+
+            files = [os.path.abspath(file.path) for file in os.scandir(temp) if file.is_file()]
+
+            fnames = [os.path.basename(file) for file in files]
+            for comp_mode in ['bzip', 'lzma', 'piedpiper']:
+                print("Testing compression using {} method".format(comp_mode))
+                ziparc_path = SerialLogger.RemovableStorageHandler._compress(temp, *files, compression=comp_mode)
+                print("Zip path: {}".format(ziparc_path))
+                with zipfile.ZipFile(ziparc_path) as zf:
+                    zipfiles = zf.namelist()
+
+                tararc_path = SerialLogger.RemovableStorageHandler._compress(temp, *files, method='tar',
+                                                                             compression=comp_mode)
+                print("Tar path: {}".format(tararc_path))
+                tf = tarfile.open(tararc_path, 'r')
+                tarfiles = tf.getnames()
+                tf.close()
+
+                self.assertListEqual(fnames, zipfiles)
+                self.assertListEqual(fnames, tarfiles)
+
+
+
 
