@@ -31,6 +31,10 @@ def level_filter(level):
     return _filter
 
 
+def _homedir():
+    return os.path.abspath(__file__)
+
+
 def _runhook(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -111,6 +115,7 @@ class RemovableStorageHandler(threading.Thread):
         :param prefix: Optionally prepend a prefix to the directory name
         :param datefmt: Datetime string format used to name directory under default scheme
         """
+        self.err_signal.wait()
 
         if scheme == 'uuid':
             dir_name = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
@@ -132,23 +137,33 @@ class RemovableStorageHandler(threading.Thread):
             self.log.exception("Error copying file %s", src)
             return None
 
+    def _backup_file(self, src, suffix='.bak', timestamp=True):
+        if timestamp:
+            date = time.strftime('-%y-%m-%d', time.gmtime(time.time()))
+        else:
+            date = ''
+        src = os.path.abspath(src)
+        dst = src + suffix + date
+        return self._copy_file(src, dst)
+
     @staticmethod
     def _compress(path, *args, method=None, compression=None):
         log = logging.getLogger()
-        if method is None or method not in ['zip', 'tar']:
-            method = 'zip'
 
         ext = {'zip': '.zip', 'tar': '.tar'}
         tar_ext = {'lzma': '.lz', 'gzip': '.gz', 'bzip': '.bz2'}
+        cmp_modes = {'zip': {None: zipfile.ZIP_STORED, 'lzma': zipfile.ZIP_LZMA, 'bzip': zipfile.ZIP_BZIP2,
+                             'zlib': zipfile.ZIP_DEFLATED},
+                     'tar': {None: '', 'lzma': 'xz', 'gzip': 'gz', 'bzip': 'bz2', 'bzip2': 'bz2'}
+                     }
+
+        if method not in ext.keys():
+            method = 'zip'
         if os.path.isdir(path):
             # If the provided path is a directory create unique zipfile name
             arcname = str(uuid.uuid4())[:13] + ext[method]
             path = os.path.abspath(os.path.join(path, arcname))
 
-        cmp_modes = {'zip': {None: zipfile.ZIP_STORED, 'lzma': zipfile.ZIP_LZMA, 'bzip': zipfile.ZIP_BZIP2,
-                             'zlib': zipfile.ZIP_DEFLATED},
-                     'tar': {None: '', 'lzma': 'xz', 'gzip': 'gz', 'bzip': 'bz2', 'bzip2': 'bz2'}
-                     }
         if compression and compression not in cmp_modes[method].keys():
             log.warning("Invalid compression method: '{}' defaulting to None for target: {}".format(compression, path))
             compression = None
@@ -166,6 +181,7 @@ class RemovableStorageHandler(threading.Thread):
             except FileExistsError:
                 log.exception("Zipfile already exists")
                 return None
+
         elif method == 'tar':
             if compression:
                 path += tar_ext[compression]
@@ -212,13 +228,14 @@ class RemovableStorageHandler(threading.Thread):
         return diag
 
     @_filehook(r'config.ya?ml')
-    def update_config(self, *args):
+    def update_config(self, match, *args):
         """Copy new configuration file from USB and reload program configuration"""
-        print("Performing config update")
+        src = os.path.abspath(os.path.join(self.device, match))
+        self._backup_file('./config.yaml')
         raise NotImplementedError
 
     @_filehook(r'log(ging)?.ya?ml')
-    def update_log_config(self, *args):
+    def update_log_config(self, match, *args):
         """Copy new configuration file from USB and reload logging configuration"""
         print("Performing logging config update")
         raise NotImplementedError
@@ -281,6 +298,15 @@ class RemovableStorageHandler(threading.Thread):
                 self.log.info("Trigger file matched: {}".format(match.group()))
                 self.file_hooks[pattern](match.group(), self.last_copy_path)
 
+    @staticmethod
+    def _unmount(mount_path):
+        log = logging.getLogger()
+        try:
+            result = subprocess.check_output(['/bin/umount', mount_path])
+        except OSError:
+            log.exception("Error occured while attempting to unmount device: {}".format(mount_path))
+        return result
+
     def run(self):
         """
         Target function for usb transfer thread. This function polls for the presence of a filesystem at an arbitrary
@@ -297,13 +323,12 @@ class RemovableStorageHandler(threading.Thread):
             self.log.info("USB device detected at {}".format(self.device))
             self.act_signal.set()
 
-            exit_codes = []
             for run_hook in self.run_hooks:
-                exit_codes.append(run_hook())
+                run_hook()
             os.sync()
 
             # Finally:
-            umount = subprocess.run(['umount', self.device])
+            umount = self._unmount(self.device)
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
             self.act_signal.clear()
 
