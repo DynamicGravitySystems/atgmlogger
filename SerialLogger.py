@@ -115,7 +115,6 @@ class RemovableStorageHandler(threading.Thread):
         :param prefix: Optionally prepend a prefix to the directory name
         :param datefmt: Datetime string format used to name directory under default scheme
         """
-        self.err_signal.wait()
 
         if scheme == 'uuid':
             dir_name = os.path.abspath(os.path.join(self.device, str(uuid.uuid4())))
