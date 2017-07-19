@@ -6,6 +6,7 @@ import time
 import uuid
 import yaml
 import shlex
+import queue
 import shutil
 import zipfile
 import tarfile
@@ -17,6 +18,10 @@ import threading
 import subprocess
 
 import serial
+try:
+    import RPi.GPIO as gpio
+except ImportError:
+    gpio = None
 
 
 def level_filter(level):
@@ -198,11 +203,9 @@ class RemovableStorageHandler(threading.Thread):
         return path
 
     @_filehook(r'(dgs)?diag(nostics)?\.?(txt|trigger|dat)?')
-    def run_diag(self, *args, **kwargs):
+    def run_diag(self, match):
         """
         Execute series of diagnostic commands and return dictionary of results in form dict[cmd] = result
-        :param args: For compatability with hook call
-        :param kwargs: For compatability with hook call
         :return: Dict. of diagnostic commands = results
         """
         diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
@@ -295,7 +298,7 @@ class RemovableStorageHandler(threading.Thread):
             match = re.search(pattern, flist)
             if match:
                 self.log.info("Trigger file matched: {}".format(match.group()))
-                self.file_hooks[pattern](match.group(), self.last_copy_path)
+                self.file_hooks[pattern](match.group())
 
     @staticmethod
     def _unmount(mount_path):
@@ -330,6 +333,136 @@ class RemovableStorageHandler(threading.Thread):
             umount = self._unmount(self.device)
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
             self.act_signal.clear()
+
+
+class GpioHandler(threading.Thread):
+    """
+    Threaded class used to handle raspberry pi GPIO signalling/output.
+    Call start() method on this class after instantiating.
+    """
+
+    def __init__(self, config, queue_size=2, verbose=False):
+        super(GpioHandler, self).__init__(name='GpioHandler')
+        self.log = logging.getLogger(__name__)
+        self._exit = threading.Event()
+
+        self._resume = None
+        self.queue = queue.Queue(queue_size)
+
+        if not gpio:
+            self.log.warning("RPi.GPIO Module is not available. GpioHandling disabled.")
+            self._init = False
+            return
+
+        self.mode = {'board': gpio.BOARD, 'bcm': gpio.BCM}[config.get('mode', 'board')]
+
+        self.pin_data = int(config['data_led'])
+        self.pin_usb = int(config['usb_led'])
+        self.pin_err = int(config['aux_led'])
+        self.outputs = [self.pin_data, self.pin_err, self.pin_usb]
+        self.inputs = []
+
+        if not verbose:
+            gpio.setwarnings(False)
+        gpio.setmode(self.mode)
+        self._setup(self.outputs, gpio.OUT)
+        self._setup(self.inputs, gpio.IN)
+        self._init = True
+
+    @staticmethod
+    def _setup(pins, mode):
+        for pin in pins:
+            gpio.setup(pin, mode)
+
+    @staticmethod
+    def _output(pin, freq=.1):
+        try:
+            gpio.output(pin, True)
+            time.sleep(freq)
+            gpio.output(pin, False)
+        except AttributeError:
+            print("GPIO not available to turn on pin {}".format(pin))
+            time.sleep(freq)
+            print("GPIO not available to turn off pin {}".format(pin))
+
+    def blink(self, led, count=1, freq=0.1, priority=0, force=False):
+        """
+        Put a request to blink an led on the blink queue
+        :param led:
+        :param count: Number of times to repeat, to repeat forever pass -1
+        :param freq:
+        :param priority: Placeholder for future implementation
+        :param force:
+        :return:
+        """
+        # Condense parameters into a tuple
+        blink_t = (led, count, freq, priority)
+        if force:
+            try:
+                self._resume = self.queue.get(block=False)
+                self.clear()
+            except queue.Empty:
+                self._resume = None
+        try:
+            self.queue.put(blink_t, block=force)
+            return True
+        except queue.Full:
+            return False
+
+    def clear(self):
+        """Clear the current signal(s) from queue"""
+        while not self.queue.empty():
+            self.queue.get(block=False)
+
+    def exit(self, join=False):
+        """
+        Exit the GpioHandler thread by setting the _exit signal, clearing the current queue,
+        then putting an "exit" on the queue (otherwise the loop will block until an item is avail).
+        """
+        if not self.is_alive():
+            return True
+        self.log.info("Exit called on thread:{} id:{}".format(self.name, self.ident))
+        self._exit.set()
+        self.clear()
+        self.queue.put(None, False) # Put an empty item on queue to force continue
+        if join:
+            self.join()
+
+    def run(self):
+        """
+        If persistent blink is set, then blink the specified LED until it is unset
+        else:
+        Wait for an intermittent blink
+        priority is not currently evaluated, a thread can force a blink using the force param in blink()
+
+        :return:
+        """
+        if not self._init:
+            self.log.warning("GpioHandler not initialized, functionality disabled.")
+            self._exit.set()
+            return
+
+        while not self._exit.is_set():
+            item = self.queue.get(block=True)
+            if item is None:
+                continue
+
+            pin, count, freq, priority = item
+            if count == 0:
+                continue
+            elif count-1 != 0:
+                # If the decremented count is not 0 we'll put it back on the queue to run again
+                self.blink(pin, count-1, freq, priority, force=False)
+            elif self._resume:
+                # If the decremented count is 0, and we have an item to resume, put the resume item on the queue
+                self.blink(*self._resume)
+
+            self._output(pin, freq)
+
+        # Clean up gpio before exiting
+        if gpio:
+            gpio.cleanup()
+        self.log.info("GpioHandler thread safely exited.")
 
 
 class SerialLogger:
@@ -593,7 +726,8 @@ class SerialLogger:
         self.threads = []
 
         # Initialize utility threads
-        led_thread = threading.Thread(target=self.led_signaler, name='ledsignal')
+        led_thread = GpioHandler(self.c_signal)
+        # led_thread = threading.Thread(target=self.led_signaler, name='ledsignal')
         led_thread.start()
         self.threads.append(led_thread)
 

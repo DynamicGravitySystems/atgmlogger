@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock as mock
 import SerialLogger
 import logging
 import tempfile
@@ -9,6 +10,7 @@ import sys
 import os
 import zipfile
 import tarfile
+import time
 
 
 class TestSerialLogger(unittest.TestCase):
@@ -73,13 +75,11 @@ class TestSerialLogger(unittest.TestCase):
         self.assertIsInstance(result, str)
 
     def test_SerialLogger_init(self):
+        # Can't capture logging output here as the init function initializes logging
         inst = SerialLogger.SerialLogger(self.sl_args)
         self.assertEqual('./logs', inst.logdir)
 
-
-
     def test_init_logging(self):
-
         pass
 
     def test_RSH_copy_logs(self):
@@ -139,16 +139,12 @@ class TestSerialLogger(unittest.TestCase):
             files = [os.path.abspath(file.path) for file in os.scandir(temp) if file.is_file()]
 
             fnames = [os.path.basename(file) for file in files]
-            for comp_mode in ['bzip', 'lzma', 'piedpiper']:
-                print("Testing compression using {} method".format(comp_mode))
+            for comp_mode in ['bzip', 'lzma']:
                 ziparc_path = SerialLogger.RemovableStorageHandler._compress(temp, *files, compression=comp_mode)
-                print("Zip path: {}".format(ziparc_path))
                 with zipfile.ZipFile(ziparc_path) as zf:
                     zipfiles = zf.namelist()
-
                 tararc_path = SerialLogger.RemovableStorageHandler._compress(temp, *files, method='tar',
                                                                              compression=comp_mode)
-                print("Tar path: {}".format(tararc_path))
                 tf = tarfile.open(tararc_path, 'r')
                 tarfiles = tf.getnames()
                 tf.close()
@@ -156,6 +152,42 @@ class TestSerialLogger(unittest.TestCase):
                 self.assertListEqual(fnames, zipfiles)
                 self.assertListEqual(fnames, tarfiles)
 
+    def test_gpio_handler_exit(self):
+        config = {'data_led': 5, 'usb_led': 6, 'aux_led': 7}
+        SerialLogger.gpio = mock.NonCallableMock()
+        gph = SerialLogger.GpioHandler(config, verbose=True)
+        gph.start()
+        self.assertTrue(gph.is_alive())
+        with self.assertLogs(level=logging.INFO):
+            gph.exit(join=True)
+        self.assertFalse(gph.is_alive())
 
+    def test_gpio_handler_signal(self):
+        gpio = mock.NonCallableMock()
+        gpio.output = mock.Mock()
+        SerialLogger.gpio = gpio
+        config = {'data_led': 5, 'usb_led': 6, 'aux_led': 7, 'mode': 'board'}
+        gph = SerialLogger.GpioHandler(config, verbose=True)
+        try:
+            gph.start()
+            gph.blink(14, 2)
+            time.sleep(.1)
+            gpio.output.assert_any_call(14, True)
 
+            # print("Turning on led 23 until stopped")
+            gph.blink(23, -1, force=True)
+            time.sleep(.1)
+            gpio.output.assert_any_call(23, True)
+
+            # print("Trying to blink 99 once")
+            gph.blink(99, force=True)
+            time.sleep(.1)
+            gpio.output.assert_any_call(99, True)
+            with self.assertLogs(level=logging.INFO):
+                gph.exit(join=True)
+            self.assertFalse(gph.is_alive())
+        except AssertionError:
+            raise
+        finally:
+            gph.exit(join=True)
 
