@@ -673,61 +673,11 @@ class SerialLogger:
         handle.close()
         return 0
 
-    def led_signaler(self):
-        try:
-            import RPi.GPIO as GPIO
-        except ImportError:
-            self.log.warning("Raspberry PI GPIO Module is not available, LED signaling disabled.")
-            return 1  # Return and exit thread
-
-        # Initialize Raspberry Pi GPIO pins
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BOARD)
-
-        def blink_led(gpio_pin, duration=.1):
-            """Turn an output at pin on for duration, then off"""
-            # Gets the current state of an output (not necessary currently)
-            # state = gpio.input(pin)
-            GPIO.output(gpio_pin, True)
-            time.sleep(duration)
-            GPIO.output(gpio_pin, False)
-            time.sleep(duration)
-
-        data_l = self.c_signal['data_led']
-        usb_l = self.c_signal['usb_led']
-        aux_l = self.c_signal['aux_led']
-        outputs = [data_l, usb_l, aux_l]
-        for pin in outputs:
-            GPIO.setup(pin, GPIO.OUT)
-            blink_led(pin)  # Test single blink on each LED
-
-        while not self.exit_signal.is_set():
-            # USB signal takes precedence over data recording
-            if self.usb_signal.is_set():
-                blink_led(usb_l, duration=.1)
-                # Don't clear the signal, the transfer logic will clear when complete
-            elif self.data_signal.is_set():
-                blink_led(data_l, duration=.1)
-                self.data_signal.clear()
-
-            if self.err_signal.is_set():
-                GPIO.output(aux_l, True)
-            else:
-                GPIO.output(aux_l, False)
-            time.sleep(.01)  # Rate limit the loop to cut down CPU hogging
-
-        # Exiting: Turn off all outputs, then call cleanup()
-        for pin in outputs:
-            GPIO.output(pin, False)
-        GPIO.cleanup()
-        self.log.info("Led thread gracefully exited")
-
     def run(self):
         self.threads = []
 
         # Initialize utility threads
         led_thread = GpioHandler(self.c_signal)
-        # led_thread = threading.Thread(target=self.led_signaler, name='ledsignal')
         led_thread.start()
         self.threads.append(led_thread)
 
@@ -739,7 +689,6 @@ class SerialLogger:
             'copy_level': self.c_usb['copy_level'],
             'verbosity': self.verbosity
         }
-
         usb_handler = RemovableStorageHandler(**usb_handler_opts)
         usb_handler.start()
         self.threads.append(usb_handler)
