@@ -37,13 +37,13 @@ system/SerialLogger.service:
 
 .PHONY: install
 install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES)
-    if [ -z $(DESTDIR) ]; then
-        systemctl daemon-reload
-        systemctl disable media-removable.mount
-        systemctl enable media-removable.mount
-        systemctl disable SerialLogger.service
-        systemctl enable SerialLogger.service
-    fi
+	@if [ -z "$(DESTDIR)" ]; then\
+		systemctl daemon-reload; \
+		systemctl disable media-removable.mount; \
+		systemctl enable media-removable.mount; \
+		systemctl disable SerialLogger.service; \
+		systemctl enable SerialLogger.service; \
+	fi; \
 
 $(BUILD_PATH):
 	$(MKDIR) $(BUILD_PATH)

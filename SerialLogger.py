@@ -81,6 +81,7 @@ class RemovableStorageHandler(threading.Thread):
         self.poll_int = poll_interval
         self.log = logging.getLogger()
         self.verbosity = verbosity
+        self.exit_signal = threading.Event()
 
         # Instance Fields
         self.datetime_fmt = '%y-%m-%d %H:%M:%S'
@@ -93,7 +94,7 @@ class RemovableStorageHandler(threading.Thread):
             self.log.info('{} Initialized'.format(self.__class__.__name__))
 
     @staticmethod
-    def write(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
+    def write_file(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
         """Write or append arbitrary data to specified dest file."""
         mode = {True: 'w+', False: 'w'}[append]
         lines = []
@@ -106,7 +107,7 @@ class RemovableStorageHandler(threading.Thread):
         try:
             with open(os.path.abspath(dest), mode, encoding=encoding) as fd:
                 for line in lines:
-                    fd.write(line + eol)
+                    fd.write("".join([line, eol]))
                 fd.flush()
         except OSError:
             print("Encountered OSError during write operation")
@@ -208,7 +209,8 @@ class RemovableStorageHandler(threading.Thread):
         Execute series of diagnostic commands and return dictionary of results in form dict[cmd] = result
         :return: Dict. of diagnostic commands = results
         """
-        diag_cmds = ['top -b -n1', 'df -H', 'free -h', 'dmesg']
+        self.log.debug("Running diagnostics on system")
+        diag_cmds = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
         diag = {'Diagnostic Timestamp': time.strftime(self.datetime_fmt, time.gmtime(time.time()))}
         for cmd in diag_cmds:
             try:
@@ -227,7 +229,7 @@ class RemovableStorageHandler(threading.Thread):
             except FileNotFoundError:
                 self.log.warning('{} not available on this system.'.format(proc_cpuinfo))
 
-        return diag
+        self.write_file(os.path.join(self.last_copy_path, 'diag.txt'), delim=':\n', **diag)
 
     @_filehook(r'config.ya?ml')
     def update_config(self, match, *args):
@@ -309,6 +311,11 @@ class RemovableStorageHandler(threading.Thread):
             log.exception("Error occured while attempting to unmount device: {}".format(mount_path))
         return result
 
+    def exit(self, join=False):
+        self.exit_signal.set()
+        if join:
+            self.join()
+
     def run(self):
         """
         Target function for usb transfer thread. This function polls for the presence of a filesystem at an arbitrary
@@ -333,6 +340,7 @@ class RemovableStorageHandler(threading.Thread):
             umount = self._unmount(self.device)
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
             self.act_signal.clear()
+        return 0
 
 
 class GpioHandler(threading.Thread):
@@ -368,6 +376,7 @@ class GpioHandler(threading.Thread):
         self._setup(self.outputs, gpio.OUT)
         self._setup(self.inputs, gpio.IN)
         self._init = True
+        self.log.debug("GpioHandler initialized with data_led = {}".format(self.pin_data))
 
     @staticmethod
     def _setup(pins, mode):
@@ -425,6 +434,7 @@ class GpioHandler(threading.Thread):
         self._exit.set()
         self.clear()
         self.queue.put(None, False) # Put an empty item on queue to force continue
+        # Turn off all initialized pins
         if join:
             self.join()
 
@@ -461,6 +471,8 @@ class GpioHandler(threading.Thread):
 
         # Clean up gpio before exiting
         if gpio:
+            for pin in self.outputs:
+                gpio.output(pin, False)
             gpio.cleanup()
         self.log.info("GpioHandler thread safely exited.")
 
@@ -611,9 +623,14 @@ class SerialLogger:
         self.exit_signal.set()
         self.log.warning("Application exiting, joining threads.")
         for thread in self.threads:
+            try:
+                thread.exit()
+            except AttributeError:
+                pass
             if thread.is_alive():
                 self.log.debug("Thread {} is still alive, joining.".format(thread.name))
                 thread.join()
+                self.log.debug("Thread {} joined".format(thread.name))
         return 0
 
     @staticmethod
@@ -661,7 +678,7 @@ class SerialLogger:
                     self.last_data = time.time()
                     self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
                                                                                        time.gmtime(self.last_data))))
-                    self.data_signal.set()
+                    self.led.blink(16)
                     self.log.debug(data)
 
             except serial.SerialException:
@@ -671,6 +688,7 @@ class SerialLogger:
         if self.exit_signal.is_set():
             self.log.info('Exit signal received, exiting thread %s', device)
         handle.close()
+        self.log.debug("Serial handle closed")
         return 0
 
     def run(self):
@@ -679,11 +697,13 @@ class SerialLogger:
         # Initialize utility threads
         led_thread = GpioHandler(self.c_signal)
         led_thread.start()
+        self.led = led_thread
         self.threads.append(led_thread)
+        self.log.debug("LED Thread initialized and started.")
 
         usb_handler_opts = {
-            'log_src': self.logdir,
-            'device_path': self.c_usb['mount'],
+            'logdir': self.logdir,
+            'mount_path': self.c_usb['mount'],
             'activity_signal': self.usb_signal,
             'error_signal': self.err_signal,
             'copy_level': self.c_usb['copy_level'],
@@ -692,6 +712,7 @@ class SerialLogger:
         usb_handler = RemovableStorageHandler(**usb_handler_opts)
         usb_handler.start()
         self.threads.append(usb_handler)
+        self.log.debug("USB Handler Thread initialized and started.")
 
         self.log.debug("Entering main loop.")
         while not self.exit_signal.is_set():
@@ -716,9 +737,11 @@ if __name__ == "__main__":
     main = SerialLogger(sys.argv)
     exit_code = 1
     try:
+        print("Starting main.run()")
         exit_code = main.run()
     except KeyboardInterrupt:
         print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
         main.clean_exit()
     finally:
         exit(exit_code)
+    exit(0)
