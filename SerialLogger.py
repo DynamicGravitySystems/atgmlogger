@@ -7,6 +7,7 @@ import uuid
 import yaml
 import shlex
 import queue
+import signal
 import shutil
 import zipfile
 import tarfile
@@ -59,7 +60,7 @@ def _filehook(pattern):
 
 
 class RemovableStorageHandler(threading.Thread):
-    def __init__(self, logdir, mount_path, activity_signal, error_signal, poll_interval=1,
+    def __init__(self, logdir, mount_path, gpio_h, poll_interval=.5,
                  copy_level='all', verbosity=0):
         super(RemovableStorageHandler, self).__init__(name='RemovableStorageHandler')
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
@@ -76,8 +77,7 @@ class RemovableStorageHandler(threading.Thread):
         # Assignments
         self.log_dir = logdir
         self.device = mount_path
-        self.err_signal = error_signal
-        self.act_signal = activity_signal
+        self.gpio_h = gpio_h
         self.poll_int = poll_interval
         self.log = logging.getLogger()
         self.verbosity = verbosity
@@ -103,7 +103,6 @@ class RemovableStorageHandler(threading.Thread):
         for key, val in kwargs.items():
             line = "".join([str(key), delim, str(val)]).strip('\'\"')
             lines.append(line)
-
         try:
             with open(os.path.abspath(dest), mode, encoding=encoding) as fd:
                 for line in lines:
@@ -193,6 +192,7 @@ class RemovableStorageHandler(threading.Thread):
                 mode = 'x:' + cmp_modes[method][compression]
             else:
                 mode = 'x'
+            tf = None
             try:
                 tf = tarfile.open(path, mode=mode)
                 for file in inputs:
@@ -200,7 +200,8 @@ class RemovableStorageHandler(threading.Thread):
             except FileExistsError:
                 log.exception("Tarfile already exists")
             finally:
-                tf.close()
+                if tf:
+                    tf.close()
         return path
 
     @_filehook(r'(dgs)?diag(nostics)?\.?(txt|trigger|dat)?')
@@ -234,7 +235,7 @@ class RemovableStorageHandler(threading.Thread):
     @_filehook(r'config.ya?ml')
     def update_config(self, match, *args):
         """Copy new configuration file from USB and reload program configuration"""
-        src = os.path.abspath(os.path.join(self.device, match))
+        # src = os.path.abspath(os.path.join(self.device, match))
         self._backup_file('./config.yaml')
         raise NotImplementedError
 
@@ -308,6 +309,7 @@ class RemovableStorageHandler(threading.Thread):
         try:
             result = subprocess.check_output(['/bin/umount', mount_path])
         except OSError:
+            result = None
             log.exception("Error occured while attempting to unmount device: {}".format(mount_path))
         return result
 
@@ -330,7 +332,7 @@ class RemovableStorageHandler(threading.Thread):
 
             # Else:
             self.log.info("USB device detected at {}".format(self.device))
-            self.act_signal.set()
+            self.gpio_h.blink(18, -1, .05)
 
             for run_hook in self.run_hooks:
                 run_hook()
@@ -339,7 +341,7 @@ class RemovableStorageHandler(threading.Thread):
             # Finally:
             umount = self._unmount(self.device)
             self.log.info("Unmount operation returned with exit code: {}".format(umount))
-            self.act_signal.clear()
+            self.gpio_h.clear()
         return 0
 
 
@@ -389,6 +391,7 @@ class GpioHandler(threading.Thread):
             gpio.output(pin, True)
             time.sleep(freq)
             gpio.output(pin, False)
+            time.sleep(freq)
         except AttributeError:
             print("GPIO not available to turn on pin {}".format(pin))
             time.sleep(freq)
@@ -418,6 +421,7 @@ class GpioHandler(threading.Thread):
         except queue.Full:
             return False
 
+    # TODO: Add ability to clear only specific signals (for a pin)
     def clear(self):
         """Clear the current signal(s) from queue"""
         while not self.queue.empty():
@@ -433,7 +437,7 @@ class GpioHandler(threading.Thread):
         self.log.info("Exit called on thread:{} id:{}".format(self.name, self.ident))
         self._exit.set()
         self.clear()
-        self.queue.put(None, False) # Put an empty item on queue to force continue
+        self.queue.put(None, False)  # Put an empty item on queue to force continue
         # Turn off all initialized pins
         if join:
             self.join()
@@ -477,8 +481,9 @@ class GpioHandler(threading.Thread):
         self.log.info("GpioHandler thread safely exited.")
 
 
-class SerialLogger:
+class SerialLogger(threading.Thread):
     def __init__(self, argv):
+        super(SerialLogger, self).__init__(name='SerialLogger')
         parser = argparse.ArgumentParser(prog=argv[0],
                                          description="Serial Data Logger")
         parser.add_argument('-V', '--version', action='version',
@@ -487,7 +492,7 @@ class SerialLogger:
         parser.add_argument('-l', '--logdir', action='store', default='/var/log/dgs')
         parser.add_argument('-d', '--device', action='store')
         parser.add_argument('-c', '--configuration', action='store', default='config.yaml')
-        opts = parser.parse_args(argv[1:])
+        args = parser.parse_args(argv[1:])
 
         # Default settings in the event of missing config.yaml file.
         defaults = {
@@ -500,12 +505,14 @@ class SerialLogger:
                 'logdir': '/var/log/dgs/'
             },
             'serial': {
-                'device': '/dev/ttyS0',
+                'port': '/dev/ttyS0',
                 'baudrate': 57600,
                 'bytesize': 8,
                 'parity': 'N',
                 'stopbits': 1,
-                'flowctrl': 0,
+                'xonxoff': False,
+                'rtscts': False,
+                'dsrdtr': False,
                 'timeout': 1
             },
             'signal': {
@@ -515,8 +522,8 @@ class SerialLogger:
             }
         }
 
-        config = self.load_config(opts.configuration, defaults)
-        # Config sub subleafs
+        config = self.load_config(args.configuration, defaults)
+        # Config subleafs
         self.c_usb = config.get('usb', defaults['usb'])
         self.c_logging = config.get('logging', defaults['logging'])
         self.c_serial = config.get('serial', defaults['serial'])
@@ -526,29 +533,29 @@ class SerialLogger:
         self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
 
         # Logging definitions
-        if opts.logdir is None:
+        if args.logdir is None:
             self.logdir = self.c_logging['logdir']
         else:
-            self.logdir = opts.logdir
+            self.logdir = args.logdir
         self.log = None
         self.data_level = 60
-        self.verbosity = self.set_verbosity(opts.verbose)
+        self.verbosity = self.set_verbosity(args.verbose)
         self.verbosity_map = {0: logging.CRITICAL, 1: logging.WARNING, 2: logging.INFO, 3: logging.DEBUG}
 
         self.init_logging()
 
         # Thread signal definitions
         self.exit_signal = threading.Event()
-        self.data_signal = threading.Event()
-        self.usb_signal = threading.Event()
-        self.err_signal = threading.Event()
         self.reload_signal = threading.Event()
+        self.err_signal = threading.Event()
+        # self.data_signal = threading.Event()
+        # self.usb_signal = threading.Event()
 
         # Serial Port Settings
-        if opts.device is None:
-            self.device = self.c_serial['device']
+        if args.device is None:
+            self.device = self.c_serial['port']
         else:
-            self.device = opts.device
+            self.device = args.device
 
         # USB Mount Path
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
@@ -556,6 +563,21 @@ class SerialLogger:
 
         # Thread List Object
         self.threads = []
+
+        # Initialize Utility threads, but don't start them
+        gpioh = GpioHandler(self.c_signal)
+        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'])
+        self.threads.append(gpioh)
+
+        rsh_opts = {
+            'logdir': self.logdir,
+            'mount_path': self.c_usb['mount'],
+            'gpio_h': gpioh,
+            'copy_level': self.c_usb['copy_level'],
+            'verbosity': self.verbosity
+        }
+        rsh = RemovableStorageHandler(**rsh_opts)
+        self.threads.append(rsh)
 
         # Statistics tracking
         self.last_data = 0
@@ -576,7 +598,7 @@ class SerialLogger:
         try:
             with open(os.path.abspath(config_path), 'r') as config_raw:
                 config_dict = yaml.load(config_raw)
-        except Exception as e:
+        except OSError:
             # print("Exception encountered loading configuration file, proceeding with defaults.")
             # print(e.__repr__())
             config_dict = default_opts
@@ -648,88 +670,65 @@ class SerialLogger:
             decoded = None
         return decoded
 
-    def device_listener(self, device=None):
-        """
-        Target function for serial data collection thread, called from run() method.
-        :param device: Full path to the serial device to listen on e.g. /dev/ttyS0
-        :return: Int exit_code. 0 = success, 1 = error.
-        """
-        try:
-            handle = serial.Serial(device, baudrate=self.c_serial['baudrate'], parity=self.c_serial['parity'],
-                                   stopbits=self.c_serial['stopbits'], bytesize=self.c_serial['bytesize'],
-                                   timeout=self.c_serial['timeout'])
-            self.log.info("Opened serial handle on device:{device} baudrate:{baudrate}, parity:{parity}, "
-                          "stopbits:{stopbits}, bytesize:{bytesize}".format(device=device,
-                                                                            baudrate=self.c_serial['baudrate'],
-                                                                            parity=self.c_serial['parity'],
-                                                                            stopbits=self.c_serial['stopbits'],
-                                                                            bytesize=self.c_serial['bytesize']))
-        except serial.SerialException:
-            self.log.exception('Exception encountered attempting to open serial comm port %s', device)
-            return 1
-        while not self.exit_signal.is_set():
-            try:
-                data = self.decode(handle.readline())
-                if data == '':
-                    continue
-                if data is not None:
-                    self.log.log(self.data_level, data)
-                    self.data_interval = time.time() - self.last_data
-                    self.last_data = time.time()
-                    self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
-                                                                                       time.gmtime(self.last_data))))
-                    self.led.blink(16)
-                    self.log.debug(data)
-
-            except serial.SerialException:
-                self.log.exception('Exception encountered attempting to read from device %s', device)
-                handle.close()
-                return 1
-        if self.exit_signal.is_set():
-            self.log.info('Exit signal received, exiting thread %s', device)
-        handle.close()
-        self.log.debug("Serial handle closed")
-        return 0
+    def get_handle(self, **kwargs):
+        se_handle = serial.Serial(**kwargs)
+        self.log.info("Opened serial handle - device:{port} baudrate:{baudrate}, parity:{parity}, "
+                      "stopbits:{stopbits}, bytesize:{bytesize}".format(**kwargs))
+        return se_handle
 
     def run(self):
-        self.threads = []
+        """ TODO: Documentation """
+        # Start utility threads
+        for thread in self.threads:
+            thread.start()
 
-        # Initialize utility threads
-        led_thread = GpioHandler(self.c_signal)
-        led_thread.start()
-        self.led = led_thread
-        self.threads.append(led_thread)
-        self.log.debug("LED Thread initialized and started.")
+        try:
+            se_handle = self.get_handle(**self.c_serial)
+        except serial.SerialException:
+            self.log.exception("Error opening serial port for listening, terminating execution.")
+            return 1
 
-        usb_handler_opts = {
-            'logdir': self.logdir,
-            'mount_path': self.c_usb['mount'],
-            'activity_signal': self.usb_signal,
-            'error_signal': self.err_signal,
-            'copy_level': self.c_usb['copy_level'],
-            'verbosity': self.verbosity
-        }
-        usb_handler = RemovableStorageHandler(**usb_handler_opts)
-        usb_handler.start()
-        self.threads.append(usb_handler)
-        self.log.debug("USB Handler Thread initialized and started.")
-
-        self.log.debug("Entering main loop.")
+        self.log.debug("Entering SerialLogger main loop.")
         while not self.exit_signal.is_set():
             if self.reload_signal.is_set():
                 self.init_logging()
                 self.reload_signal.clear()
 
-            # Filter out dead threads
-            self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
-            if self.device not in [t.name for t in self.threads]:
-                self.log.debug("Spawning new thread for device {}".format(self.device))
-                dev_thread = threading.Thread(target=self.device_listener,
-                                              name=self.device, kwargs={'device': self.device})
-                dev_thread.start()
-                self.threads.append(dev_thread)
+            if not se_handle.is_open:
+                try:
+                    se_handle.open()
+                except serial.SerialException:
+                    self.log.exception("Unable to reopen serial handle, exiting.")
+                    return 1
 
-            time.sleep(self.thread_poll_interval)
+            try:
+                data = self.decode(se_handle.readline())
+                if data == '':
+                    continue
+                if data is not None:
+                    self.log.log(self.data_level, data)  # Write data to gravdata log file using custom filter
+                    self.data_signal()
+                    self.data_interval = time.time() - self.last_data
+                    self.last_data = time.time()
+                    self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
+                                                                                       time.gmtime(self.last_data))))
+                    self.log.debug(data)
+            except serial.SerialException:
+                self.log.exception("Exception encountered attempting to call readline() on serial handle")
+                se_handle.close()
+
+            "This section is unnecesarry I think"
+            # Filter out dead threads
+            # self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
+            # if self.device not in [t.name for t in self.threads]:
+            #     self.log.debug("Spawning new thread for device {}".format(self.device))
+            #     dev_thread = threading.Thread(target=self.device_listener,
+            #                                   name=self.device, kwargs={'device': self.device})
+            #     dev_thread.start()
+            #     self.threads.append(dev_thread)
+
+        se_handle.close()
+        logging.shutdown()
         return 0
 
 
@@ -737,11 +736,12 @@ if __name__ == "__main__":
     main = SerialLogger(sys.argv)
     exit_code = 1
     try:
-        print("Starting main.run()")
-        exit_code = main.run()
+        print("Starting main thread.")
+        main.start()
+        # Wait (potentially forever) for main to finish.
+        # main.join()
+        signal.pause()
     except KeyboardInterrupt:
         print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
         main.clean_exit()
-    finally:
-        exit(exit_code)
-    exit(0)
+    sys.exit(0)

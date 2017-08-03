@@ -6,12 +6,11 @@ usb:
 logging:
   logdir: /var/log/dgs/
 serial:
-  device: /dev/ttyS0
+  port: /dev/ttyS0
   baudrate: 57600
   bytesize: 8
   parity: 'N'
   stopbits: 1
-  flowctrl: 0
   timeout: 1
 signal:
   data_led: 16
