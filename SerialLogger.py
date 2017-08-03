@@ -308,6 +308,7 @@ class RemovableStorageHandler(threading.Thread):
         log = logging.getLogger()
         try:
             result = subprocess.check_output(['/bin/umount', mount_path])
+            print(result)
         except OSError:
             result = None
             log.exception("Error occured while attempting to unmount device: {}".format(mount_path))
@@ -340,7 +341,7 @@ class RemovableStorageHandler(threading.Thread):
 
             # Finally:
             umount = self._unmount(self.device)
-            self.log.info("Unmount operation returned with exit code: {}".format(umount))
+            self.log.info("Unmount operation returned with exit code: {}".format(str(umount)))
             self.gpio_h.clear()
         return 0
 
