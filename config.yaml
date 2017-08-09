@@ -13,6 +13,6 @@ serial:
   stopbits: 1
   timeout: 1
 signal:
-  data_led: 16
-  usb_led: 18
-  aux_led: 22
+  data_led: 11
+  usb_led: 13
+  aux_led: 15

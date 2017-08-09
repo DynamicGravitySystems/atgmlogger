@@ -1,3 +1,5 @@
+#!/usr/bin/python3.6
+# coding: utf-8
 import os
 import re
 import sys
@@ -266,7 +268,7 @@ class RemovableStorageHandler(threading.Thread):
 
         if copy_size > get_free(self.device):  # TODO: We should attempt to copy whatever will fit
             self.log.critical("USB Device does not have enough free space to copy logs")
-            self.err_signal.set()
+            # self.err_signal.set()
             return 1
 
         # Else, copy the files:
@@ -281,7 +283,7 @@ class RemovableStorageHandler(threading.Thread):
                 shutil.copy(src, dest_file)
                 self.log.info("Copied file %s to %s", file, dest_file)
             except OSError:
-                self.err_signal.set()
+                # self.err_signal.set()
                 self.log.exception("Exception encountered while copying log file.")
                 return 1
 
@@ -333,7 +335,7 @@ class RemovableStorageHandler(threading.Thread):
 
             # Else:
             self.log.info("USB device detected at {}".format(self.device))
-            self.gpio_h.blink(18, -1, .05)
+            self.gpio_h.blink(15, -1, .05)  # TODO: This needs to be fixed so as not to hardcode the pin num here
 
             for run_hook in self.run_hooks:
                 run_hook()
@@ -408,6 +410,10 @@ class GpioHandler(threading.Thread):
         :param force:
         :return:
         """
+        if led not in self.outputs:
+            # Prevent runtime error if invalid pin is triggered which has not been initialized
+            return False
+
         # Condense parameters into a tuple
         blink_t = (led, count, freq, priority)
         if force:
