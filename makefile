@@ -38,6 +38,7 @@ system/SerialLogger.service:
 .PHONY: install
 install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES)
 	@if [ -z "$(DESTDIR)" ]; then\
+		pip install -r requirements.txt
 		systemctl daemon-reload; \
 		systemctl disable media-removable.mount; \
 		systemctl enable media-removable.mount; \
