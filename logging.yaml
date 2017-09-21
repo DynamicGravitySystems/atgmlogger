@@ -48,8 +48,7 @@ handlers:
     level: INFO
     filters: [data_filter]
 
-loggers:
-  datalog:
-    level: DEBUG
-    handlers: [data_hdlr, data_size_hdlr, debug_hdlr, app_hdlr]
-    propogate: False
+root:
+  level: DEBUG
+  handlers: [data_hdlr, data_size_hdlr, debug_hdlr, app_hdlr]
+  propogate: True

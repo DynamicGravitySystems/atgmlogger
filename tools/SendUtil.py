@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 # coding=utf-8
 
 import time
@@ -30,7 +31,26 @@ def get_handle(device=None, baudrate=57600):
     return serial_hdl
 
 
-def run(source, rate, count=0, repeat=False):
+def sendlines(ser_hdl, lines, rate=1, limit=None):
+    count = 0
+    try:
+        print("Starting sendlines limit = {}".format(limit))
+
+        for line in lines:
+            print("Sending: {}".format(line))
+            sendline(ser_hdl, line)
+            count += 1
+            time.sleep(rate)
+            if limit and count >= limit:
+                print("Limit exceeded, returning count {}".format(count))
+    except KeyboardInterrupt:
+        print("Sendlines interrupted, total count this iteration: {}".format(count))
+        raise KeyboardInterrupt
+    #finally:
+    #    return count
+
+
+def run(source, rate, count=-1, repeat=False):
     log = logging.getLogger(__name__)
     log.setLevel(logging.DEBUG)
     std_hdlr = logging.StreamHandler(stream=sys.stdout)
@@ -38,36 +58,27 @@ def run(source, rate, count=0, repeat=False):
     log.addHandler(std_hdlr)
 
     log.info("Preparing data-source for transmission")
-    data = open(source, 'r', encoding='utf-8')
-    alldata = data.readlines()
-    data.close()
-    log.info("Data loaded into memory")
+    with open(source, 'r', encoding='utf-8') as data:
+        alldata = data.readlines()
+    log.info("Data loaded into memory, sample length: {}".format(len(alldata)))
     log.info("Sending line every {} seconds".format(rate))
-
-    if count == 0:
-        count = len(alldata)
 
     send_count = 0
     ser_hdl = get_handle()
 
     if repeat:
         while True:
-            for line in alldata:
-                pass
-    else:
-        for line in alldata:
-            if send_count >= count:
-                break
             try:
-                sendline(ser_hdl, line)
-                send_count += 1
-                time.sleep(rate)
+                send_count += sendlines(ser_hdl, alldata, rate=rate)
             except KeyboardInterrupt:
-                print("Execution interrupted - total lines sent: {}".format(send_count))
-                sendline(ser_hdl, '\n\n')
-                ser_hdl.close()
-                return 0
-        print("Exhausted Data, total sent: {}".format(send_count))
+                # This does not give an accurate count yet
+                print("Got KI in repeat loop, total count={}".format(send_count))
+                break
+    else:
+        try:
+            send_count = sendlines(ser_hdl, alldata, limit=count)
+        except KeyboardInterrupt:
+            print("Execution finished, total send count= {}".format(send_count))
 
     ser_hdl.close()
 

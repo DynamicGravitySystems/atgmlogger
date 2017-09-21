@@ -2,9 +2,9 @@
 Description=DGS Serial Logger
 
 [Service]
-WorkingDirectory=/opt/SerialLogger
+WorkingDirectory=@BINDIR@
 Type=simple
-ExecStart=python3 /opt/SerialLogger/SerialLogger.py -vv
+ExecStart=@PYTHON@ @BINDIR@/SerialLogger.py -vv
 Restart=always
 
 [Install]
