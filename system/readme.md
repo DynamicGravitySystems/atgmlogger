@@ -1,28 +1,18 @@
-Dynamic Gravity Systems - Serial Data Recorder
-==============================================
+###Prerequisites:
+Python 3.5 or Python 3.6 on Raspbian Linux (Debian Based)
 
- 1. Dependencies:
- 	- Python v3.5, 3.6 and the following modules:
-		- pyserial >= 3.3
-		- jinja2 >= 2.9.6
-		- MarkupSafe == 1.0
-		- PyYAML == 3.12
-		- RPi.GPIO == 0.6.3
-	- The following system packages are required for full functionality of the USB data copying:
-		- ntfs-3g
-		- exfat-fuse
-		- exfat-utils
- 2. Installation:
-	Use the provided makefile to install the Serial Data Recorder program on a Raspberry PI microcomputer. (See the code snippet below)
-	
-```commandline
-tar -xzf serial_logger-1.0.tar.gz 
-cd serial_logger
-sudo make install
+######Debian Packages:
+- ntfs-3g
+- exfat-fuse
+- exfat-utils
 
-sudo systemctl status SerialLogger
-  ```
-  
+######Python Packages:
+- pyserial >= 3.3
+- jinja2 >= 2.9.6
+- MarkupSafe == 1.0
+- PyYAML == 3.12
+- RPi.GPIO == 0.6.3
+
 
 Automated Installation with (GNU) Make:
 ---------------------------------------
