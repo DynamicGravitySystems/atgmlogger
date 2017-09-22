@@ -6,7 +6,6 @@ import sys
 import glob
 import time
 import uuid
-import yaml
 import shlex
 import queue
 import signal
@@ -20,10 +19,13 @@ import functools
 import threading
 import subprocess
 
+import yaml
+
 import serial
 try:
     import RPi.GPIO as gpio
 except ImportError:
+    """Allows the utility to run, but without GPIO LED signalling capability."""
     gpio = None
 
 

@@ -1,6 +1,6 @@
 SHELL = /bin/sh
 PREFIX = /opt
-PYTHON = $(shell which python3)
+PYTHON = $(shell which python3.6)
 SYSTEMD = /lib/systemd/system
 UDEV = /etc/udev/rules.d
 
