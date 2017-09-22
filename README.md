@@ -1,7 +1,7 @@
 Dynamic Gravity Systems - Serial Data Recorder
 ==============================================
 
- 1. Dependencies:
+1. Dependencies:
  	- Python v3.5, 3.6 and the following modules:
 		- pyserial >= 3.3
 		- jinja2 >= 2.9.6
@@ -12,7 +12,49 @@ Dynamic Gravity Systems - Serial Data Recorder
 		- ntfs-3g
 		- exfat-fuse
 		- exfat-utils
- 2. Installation:
+2. Preparing the Raspberry Pi:
+	1. Installing Python3.6 from source:
+		- Download Python3.6 source tarball from https://www.python.org 
+		- Install the required development libraries to build the source:
+			- make
+			- build-essential
+			- libssl-dev
+			- zliblg-dev
+			- libbz2-dev
+			- libreadline-dev
+			- libsqlite3-dev
+			- wget
+			- curl
+			- llvm
+			- libncurses5-dev
+			- libncursesw5-dev
+			- xz-utils
+			- tk-dev
+		```commandline
+		sudo apt-get install -y make build-essential libssl-dev zlib1g-dev   
+		sudo apt-get install -y libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm 
+		sudo apt-get install -y libncurses5-dev  libncursesw5-dev xz-utils tk-dev
+		```
+		- Extract, Configure and Build:
+		```commandline
+		tar -xzf python-3.6.2.tgz 
+		cd python-3.6.2
+		./configure
+		make
+		sudo make altinstall
+		```
+	
+	2. Installing Python3.6 (armhf) from precompiled binary:
+		- e.g. Built on another raspberry pi and zipped.
+	3. Configure Raspberry Pi GPIO Console:
+		- By default the Raspberry Pi GPIO console is enabled as a TTY terminal, this needs to be disabled to allow it 
+		to be used as a Serial Data input.
+		- Modify /boot/cmdline.txt removing the section similar to: 'console=serial0,115200'
+ 		```commandline
+		sed -i -e s/console=serial0,115200//g /boot/cmdline.txt
+		``` 
+ 	
+3. Installation:
 	Use the provided makefile to install the Serial Data Recorder program on a Raspberry PI microcomputer. (See the code snippet below)
 	
 ```commandline
