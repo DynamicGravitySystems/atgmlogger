@@ -63,6 +63,15 @@ $(UDEV_PATH):
 $(UDEV_PATH)/%: | $(UDEV_PATH)
 	$(INSTALL) $< $@
 
+.PHONY: uninstall
+uninstall:
+	systemctl stop SerialLogger.service && systemctl disable SerialLogger.service
+	systemctl disable media-removable.mount
+	systemctl daemon-reload
+	rm -f $(SYSTEMD_FILES)
+	rm -f $(UDEV_FILES)
+	rm -rf $(BUILD_PATH)
+
 .PHONY: clean
 clean:
 	rm -f $(SRCDIR)/system/SerialLogger.service

@@ -400,7 +400,7 @@ class GpioHandler(threading.Thread):
             time.sleep(freq)
             print("GPIO not available to turn off pin {}".format(pin))
 
-    def blink(self, led, count=1, freq=0.1, priority=0, force=False):
+    def blink(self, led, count=1, freq=0.01, priority=0, force=False):
         """
         Put a request to blink an led on the blink queue
         :param led:
@@ -555,8 +555,6 @@ class SerialLogger(threading.Thread):
         self.exit_signal = threading.Event()
         self.reload_signal = threading.Event()
         self.err_signal = threading.Event()
-        # self.data_signal = threading.Event()
-        # self.usb_signal = threading.Event()
 
         # Serial Port Settings
         if args.device is None:
@@ -573,7 +571,8 @@ class SerialLogger(threading.Thread):
 
         # Initialize Utility threads, but don't start them
         gpioh = GpioHandler(self.c_signal)
-        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'])
+        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'], 1, 0.01)
+        self.no_data_signal = functools.partial(gpioh.blink, self.c_signal['aux_led'], 1, 0.1)
         self.threads.append(gpioh)
 
         rsh_opts = {
@@ -711,6 +710,7 @@ class SerialLogger(threading.Thread):
             try:
                 data = self.decode(se_handle.readline())
                 if data == '':
+                    self.no_data_signal()  # Call partial function to blink LED every 1 second (timeout) if no data
                     continue
                 if data is not None:
                     self.log.log(self.data_level, data)  # Write data to gravdata log file using custom filter
@@ -723,16 +723,6 @@ class SerialLogger(threading.Thread):
             except serial.SerialException:
                 self.log.exception("Exception encountered attempting to call readline() on serial handle")
                 se_handle.close()
-
-            "This section is unnecesarry I think"
-            # Filter out dead threads
-            # self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
-            # if self.device not in [t.name for t in self.threads]:
-            #     self.log.debug("Spawning new thread for device {}".format(self.device))
-            #     dev_thread = threading.Thread(target=self.device_listener,
-            #                                   name=self.device, kwargs={'device': self.device})
-            #     dev_thread.start()
-            #     self.threads.append(dev_thread)
 
         se_handle.close()
         logging.shutdown()
@@ -747,8 +737,9 @@ if __name__ == "__main__":
         main.start()
         # Wait (potentially forever) for main to finish.
         # main.join()
-        signal.pause()
+        signal.pause()  # This allows keyboard interrupt to be processed (I think)
     except KeyboardInterrupt:
         print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
         main.clean_exit()
+        exit_code = 0
     sys.exit(0)
