@@ -3,6 +3,7 @@ PREFIX = /opt
 PYTHON = $(shell which python3.6)
 SYSTEMD = /lib/systemd/system
 UDEV = /etc/udev/rules.d
+USB = /media/removable
 
 SRCDIR = .
 INSTALL = /usr/bin/install -m644
@@ -36,7 +37,7 @@ system/SerialLogger.service:
 	sed 's=@BINDIR@=$(abspath $(BUILD_PATH))=;s=@PYTHON@=$(PYTHON)=' $(SRCDIR)/system/SerialLogger.in > $(SRCDIR)/system/SerialLogger.service
 
 .PHONY: install
-install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES)
+install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
 	@if [ -z "$(DESTDIR)" ]; then\
 		systemctl daemon-reload; \
 		systemctl disable media-removable.mount; \
@@ -53,6 +54,9 @@ $(BUILD_PATH)/%: | $(BUILD_PATH)
 
 $(UNIT_PATH):
 	$(MKDIR) $(UNIT_PATH)
+
+$(USB):
+	$(MKDIR) $(USB)
 
 $(UNIT_PATH)/%: | $(UNIT_PATH)
 	$(INSTALL) $< $@
