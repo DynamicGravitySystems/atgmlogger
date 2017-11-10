@@ -786,6 +786,7 @@ class SerialLogger(threading.Thread):
 
                     gpssecond = float(fields[12])
                     timestamp = convert_gps_time(gpsweek, gpssecond)
+                    self.log.info("Setting system time to: UNIX({ts})".format(ts=timestamp))
                     set_time(timestamp)
 
             except serial.SerialException:
