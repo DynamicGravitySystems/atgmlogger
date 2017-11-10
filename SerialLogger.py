@@ -6,7 +6,6 @@ import sys
 import glob
 import time
 import uuid
-import yaml
 import shlex
 import queue
 import signal
@@ -20,10 +19,13 @@ import functools
 import threading
 import subprocess
 
+import yaml
+
 import serial
 try:
     import RPi.GPIO as gpio
 except ImportError:
+    """Allows the utility to run, but without GPIO LED signalling capability."""
     gpio = None
 
 
@@ -441,7 +443,7 @@ class GpioHandler(threading.Thread):
             time.sleep(freq)
             print("GPIO not available to turn off pin {}".format(pin))
 
-    def blink(self, led, count=1, freq=0.1, priority=0, force=False):
+    def blink(self, led, count=1, freq=0.01, priority=0, force=False):
         """
         Put a request to blink an led on the blink queue
         :param led:
@@ -596,8 +598,6 @@ class SerialLogger(threading.Thread):
         self.exit_signal = threading.Event()
         self.reload_signal = threading.Event()
         self.err_signal = threading.Event()
-        # self.data_signal = threading.Event()
-        # self.usb_signal = threading.Event()
 
         # Serial Port Settings
         if args.device is None:
@@ -614,7 +614,8 @@ class SerialLogger(threading.Thread):
 
         # Initialize Utility threads, but don't start them
         gpioh = GpioHandler(self.c_signal)
-        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'])
+        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'], 1, 0.01)
+        self.no_data_signal = functools.partial(gpioh.blink, self.c_signal['aux_led'], 1, 0.1)
         self.threads.append(gpioh)
 
         rsh_opts = {
@@ -758,6 +759,7 @@ class SerialLogger(threading.Thread):
                 data = self.decode(se_handle.readline())
                 tick += 1
                 if data == '':
+                    self.no_data_signal()  # Call partial function to blink LED every 1 second (timeout) if no data
                     continue
                 if data is None:
                     continue
@@ -803,8 +805,9 @@ if __name__ == "__main__":
         main.start()
         # Wait (potentially forever) for main to finish.
         # main.join()
-        signal.pause()
+        signal.pause()  # This allows keyboard interrupt to be processed (I think)
     except KeyboardInterrupt:
         print("KeyboardInterrupt intercepted in __name__ block. Exiting Program.")
         main.clean_exit()
+        exit_code = 0
     sys.exit(0)
