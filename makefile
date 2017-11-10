@@ -32,6 +32,7 @@ $(UDEV_PATH)/90-removable-storage.rules: $(SRCDIR)/system/90-removable-storage.r
 
 .PHONY: all
 all:
+	sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt
 
 system/SerialLogger.service:
 	sed 's=@BINDIR@=$(abspath $(BUILD_PATH))=;s=@PYTHON@=$(PYTHON)=' $(SRCDIR)/system/SerialLogger.in > $(SRCDIR)/system/SerialLogger.service
