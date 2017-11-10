@@ -39,6 +39,47 @@ def level_filter(level):
     return _filter
 
 
+def convert_gps_time(gpsweek: int, gpsweekseconds: float):
+    """
+    convert_gps_time :: (int -> float) -> float
+    Simplified method from DynamicGravityProcessor application:
+    https://github.com/DynamicGravitySystems/DGP
+
+    Converts a GPS time format (weeks + seconds since 6 Jan 1980) to a UNIX timestamp
+    (seconds since 1 Jan 1970) without correcting for UTC leap seconds.
+
+    Static values gps_delta and gpsweek_cf are defined by the below functions (optimization)
+    gps_delta is the time difference (in seconds) between UNIX time and GPS time.
+    gps_delta = (dt.datetime(1980, 1, 6) - dt.datetime(1970, 1, 1)).total_seconds()
+
+    gpsweek_cf is the coefficient to convert weeks to seconds
+    gpsweek_cf = 7 * 24 * 60 * 60  # 604800
+
+    :param gpsweek: Number of weeks since beginning of GPS time (1980-01-06 00:00:00)
+    :param gpsweekseconds: Number of seconds since the GPS week parameter
+    :return: (float) unix timestamp (number of seconds since 1970-01-01 00:00:00)
+    """
+    # GPS time begins 1980 Jan 6 00:00, UNIX time begins 1970 Jan 1 00:00
+    gps_delta = 315964800.0
+    gpsweek_cf = 604800
+
+    gps_ticks = (float(gpsweek) * gpsweek_cf) + float(gpsweekseconds)
+
+    timestamp = gps_delta + gps_ticks
+
+    return timestamp
+
+
+def set_time(timestamp):
+    # Set date using UNIX timestamp
+    # OS Command: date +%s -s @<timestamp>
+    # +%s sets format to Unix timestamp
+    # -s/--set= sets the date to the specified timestamp
+    cmd = 'date +%s -s @{ts}'.format(ts=timestamp)
+    output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
+    return output
+
+
 def _homedir():
     return os.path.abspath(__file__)
 
@@ -586,6 +627,10 @@ class SerialLogger(threading.Thread):
         rsh = RemovableStorageHandler(**rsh_opts)
         self.threads.append(rsh)
 
+        # Time synchronization check
+        self.time_synced = False
+        self.last_time_check = 0
+
         # Statistics tracking
         self.last_data = 0
         self.data_interval = 0
@@ -696,6 +741,7 @@ class SerialLogger(threading.Thread):
             return 1
 
         self.log.debug("Entering SerialLogger main loop.")
+        tick = 0
         while not self.exit_signal.is_set():
             if self.reload_signal.is_set():
                 self.init_logging()
@@ -710,29 +756,39 @@ class SerialLogger(threading.Thread):
 
             try:
                 data = self.decode(se_handle.readline())
+                tick += 1
                 if data == '':
                     continue
-                if data is not None:
-                    self.log.log(self.data_level, data)  # Write data to gravdata log file using custom filter
-                    self.data_signal()
-                    self.data_interval = time.time() - self.last_data
-                    self.last_data = time.time()
-                    self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
-                                                                                       time.gmtime(self.last_data))))
-                    self.log.debug(data)
+                if data is None:
+                    continue
+
+                self.log.log(self.data_level, data)  # Write data to gravdata log file using custom filter
+                self.data_signal()
+                self.data_interval = time.time() - self.last_data
+                self.last_data = time.time()
+                self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
+                                                                                   time.gmtime(self.last_data))))
+                self.log.debug(data)
+
+                # If time is not synced, check every 10 ticks, and set system time if GPS time is available.
+                if not self.time_synced and (self.last_time_check > tick + 10):
+                    self.last_time_check = tick
+                    # Decode data string and look for GPS time
+                    # TODO: Allow configuration of the GPS field no.
+                    fields = data.split(',')
+                    gpsweek = int(fields[11])
+                    if gpsweek == 0:
+                        # If gpsweek field is 0 then we can assume time is not synced on the sensor
+                        self.time_synced = False
+                        continue
+
+                    gpssecond = float(fields[12])
+                    timestamp = convert_gps_time(gpsweek, gpssecond)
+                    set_time(timestamp)
+
             except serial.SerialException:
                 self.log.exception("Exception encountered attempting to call readline() on serial handle")
                 se_handle.close()
-
-            "This section is unnecesarry I think"
-            # Filter out dead threads
-            # self.threads = list(filter(lambda x: x.is_alive(), self.threads[:]))
-            # if self.device not in [t.name for t in self.threads]:
-            #     self.log.debug("Spawning new thread for device {}".format(self.device))
-            #     dev_thread = threading.Thread(target=self.device_listener,
-            #                                   name=self.device, kwargs={'device': self.device})
-            #     dev_thread.start()
-            #     self.threads.append(dev_thread)
 
         se_handle.close()
         logging.shutdown()
