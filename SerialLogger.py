@@ -290,6 +290,14 @@ class RemovableStorageHandler(threading.Thread):
         print("Performing logging config update")
         raise NotImplementedError
 
+    @_filehook(r'$clear(\.txt)?^')
+    def clear_logs(self, match, *args):
+        """Clear all logs from the device"""
+        # Experimental
+        # TODO: Add a lock to manage contention between file copy function.
+        shutil.rmtree(self.log_dir)
+        os.mkdir(self.log_dir)
+
     @_runhook
     def copy_logs(self):
         """
@@ -773,7 +781,7 @@ class SerialLogger(threading.Thread):
                 self.log.debug(data)
 
                 # If time is not synced, check every 10 ticks, and set system time if GPS time is available.
-                if not self.time_synced and (self.last_time_check > tick + 10):
+                if not self.time_synced and (tick > self.last_time_check + 10):
                     self.last_time_check = tick
                     # Decode data string and look for GPS time
                     # TODO: Allow configuration of the GPS field no.
