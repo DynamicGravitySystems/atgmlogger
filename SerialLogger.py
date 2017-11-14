@@ -290,7 +290,7 @@ class RemovableStorageHandler(threading.Thread):
         print("Performing logging config update")
         raise NotImplementedError
 
-    @_filehook(r'$clear(\.txt)?^')
+    @_filehook(r'^\.?clear(\.txt)?$')
     def clear_logs(self, match, *args):
         """Clear all logs from the device"""
         # Experimental
@@ -750,6 +750,7 @@ class SerialLogger(threading.Thread):
             return 1
 
         self.log.debug("Entering SerialLogger main loop.")
+        self.log.info("<< Current Time. Clock is not synchrnozied, waiting for GPS data.")
         tick = 0
         while not self.exit_signal.is_set():
             if self.reload_signal.is_set():
@@ -796,6 +797,7 @@ class SerialLogger(threading.Thread):
                     timestamp = convert_gps_time(gpsweek, gpssecond)
                     self.log.info("Setting system time to: UNIX({ts})".format(ts=timestamp))
                     set_time(timestamp)
+                    self.time_synced = True
 
             except serial.SerialException:
                 self.log.exception("Exception encountered attempting to call readline() on serial handle")
