@@ -41,12 +41,14 @@ system/SerialLogger.service:
 install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
 	@if [ -z "$(DESTDIR)" ]; then\
 		sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt; \
+		systemctl stop SerialLogger.service; \
 		$(PIP) install -r requirements.txt; \
 		systemctl daemon-reload; \
 		systemctl disable media-removable.mount; \
 		systemctl enable media-removable.mount; \
 		systemctl disable SerialLogger.service; \
 		systemctl enable SerialLogger.service; \
+		echo "Start SerialLogger with sudo systemctl start SerialLogger.service"; \
 	fi; \
 
 $(BUILD_PATH):

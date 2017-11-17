@@ -21,6 +21,8 @@ import subprocess
 
 import yaml
 
+from datetime import datetime
+
 import serial
 try:
     import RPi.GPIO as gpio
@@ -253,7 +255,6 @@ class RemovableStorageHandler(threading.Thread):
     def run_diag(self, match):
         """
         Execute series of diagnostic commands and return dictionary of results in form dict[cmd] = result
-        :return: Dict. of diagnostic commands = results
         """
         self.log.debug("Running diagnostics on system")
         diag_cmds = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
@@ -292,11 +293,17 @@ class RemovableStorageHandler(threading.Thread):
 
     @_filehook(r'^\.?clear(\.txt)?$')
     def clear_logs(self, match, *args):
-        """Clear all logs from the device"""
+        """
+        Clear old log files from the device
+        Warning: If we delete ALL logs, the logging interface must be reinitialized.
+        """
         # Experimental
         # TODO: Add a lock to manage contention between file copy function.
-        shutil.rmtree(self.log_dir)
-        os.mkdir(self.log_dir)
+        self.log.debug("Clearing all old logs (except current) on USB command.")
+        # TODO: Delete the clear.txt file from usb drive when done (use match for correct fname)
+        log_files =''
+        # shutil.rmtree(self.log_dir)
+        # os.mkdir(self.log_dir)
 
     @_runhook
     def copy_logs(self):
@@ -781,26 +788,43 @@ class SerialLogger(threading.Thread):
                                                                                    time.gmtime(self.last_data))))
                 self.log.debug(data)
 
-                # If time is not synced, check every 10 ticks, and set system time if GPS time is available.
                 if not self.time_synced and (tick > self.last_time_check + 10):
                     self.last_time_check = tick
                     # Decode data string and look for GPS time
                     # TODO: Allow configuration of the GPS field no.
                     fields = data.split(',')
-                    gpsweek = int(fields[11])
-                    if gpsweek == 0:
-                        # If gpsweek field is 0 then we can assume time is not synced on the sensor
-                        self.time_synced = False
-                        continue
-
-                    gpssecond = float(fields[12])
-                    timestamp = convert_gps_time(gpsweek, gpssecond)
-                    self.log.info("Setting system time to: UNIX({ts})".format(ts=timestamp))
+                    # Handle different meter data types
+                    if len(fields) == 13:
+                        # Airborne RAW Data w/ GPS Week and GPS Second fields
+                        gpsweek = int(fields[11])
+                        gpssecond = float(fields[12])
+                        if gpsweek == 0:
+                            self.time_synced = False
+                            continue
+                        self.log.info("GPSWeek: {} Second: {}".format(
+                            gpsweek, gpssecond))
+                        timestamp = convert_gps_time(gpsweek, gpssecond)
+                    elif len(fields) == 19:
+                        # Marine RAW Data column index 18
+                        # e.g. 20171117202136
+                        # format YYYYMMDDHHmmss
+                        dt_str = str(fields[18])
+                        dt_fmt = "%Y%m%d%H%M%S"
+                        try:
+                            dt = datetime.strptime(dt_str, dt_fmt)
+                        except ValueError:
+                            self.time_synced = False
+                            continue
+                        self.log.info("DateTime: {}".format(dt))
+                        timestamp = dt.timestamp()
+                    self.log.info("Setting system time to: UNIX({ts})"
+                                  .format(ts=timestamp))
                     set_time(timestamp)
                     self.time_synced = True
 
             except serial.SerialException:
-                self.log.exception("Exception encountered attempting to call readline() on serial handle")
+                self.log.exception("Exception encountered attempting to call "
+                                   "readline() on serial handle")
                 se_handle.close()
 
         se_handle.close()
