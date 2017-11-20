@@ -1,8 +1,10 @@
 SHELL = /bin/sh
 PREFIX = /opt
-PYTHON = $(shell which python3)
+PYTHON = $(shell which python3.6)
+PIP = $(shell which pip3.6)
 SYSTEMD = /lib/systemd/system
 UDEV = /etc/udev/rules.d
+USB = /media/removable
 
 SRCDIR = .
 INSTALL = /usr/bin/install -m644
@@ -20,6 +22,11 @@ BUILD_FILES = $(BUILD_PATH)/SerialLogger.py $(BUILD_PATH)/logging.yaml $(BUILD_P
 SYSTEMD_FILES = $(UNIT_PATH)/SerialLogger.service $(UNIT_PATH)/media-removable.mount
 UDEV_FILES = $(UDEV_PATH)/90-removable-storage.rules
 
+### Begin Target Defs ###
+
+.PHONY: all
+all: ;
+
 $(BUILD_PATH)/SerialLogger.py: $(SRCDIR)/SerialLogger.py
 $(BUILD_PATH)/logging.yaml: $(SRCDIR)/logging.yaml
 $(BUILD_PATH)/config.yaml: $(SRCDIR)/config.yaml
@@ -27,22 +34,25 @@ $(UNIT_PATH)/SerialLogger.service: $(SRCDIR)/system/SerialLogger.service
 $(UNIT_PATH)/media-removable.mount: $(SRCDIR)/system/media-removable.mount
 $(UDEV_PATH)/90-removable-storage.rules: $(SRCDIR)/system/90-removable-storage.rules
 
-### Begin Target Defs ###
-
-.PHONY: all
-all:
-
 system/SerialLogger.service:
 	sed 's=@BINDIR@=$(abspath $(BUILD_PATH))=;s=@PYTHON@=$(PYTHON)=' $(SRCDIR)/system/SerialLogger.in > $(SRCDIR)/system/SerialLogger.service
 
 .PHONY: install
-install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES)
+install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
 	@if [ -z "$(DESTDIR)" ]; then\
+		@if ! grep -q ^enable_uart=1 '/boot/config.txt'; then\
+			echo "enable_uart=1" >> '/boot/config.txt'; \
+			echo "System must be restarted for serial configuration to take effect." ;\
+		fi \
+		sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt; \
+		systemctl stop SerialLogger.service; \
+		$(PIP) install -r requirements.txt; \
 		systemctl daemon-reload; \
 		systemctl disable media-removable.mount; \
 		systemctl enable media-removable.mount; \
 		systemctl disable SerialLogger.service; \
 		systemctl enable SerialLogger.service; \
+		echo "Start SerialLogger with sudo systemctl start SerialLogger.service"; \
 	fi; \
 
 $(BUILD_PATH):
@@ -54,6 +64,9 @@ $(BUILD_PATH)/%: | $(BUILD_PATH)
 $(UNIT_PATH):
 	$(MKDIR) $(UNIT_PATH)
 
+$(USB):
+	$(MKDIR) $(USB)
+
 $(UNIT_PATH)/%: | $(UNIT_PATH)
 	$(INSTALL) $< $@
 
@@ -62,6 +75,15 @@ $(UDEV_PATH):
 
 $(UDEV_PATH)/%: | $(UDEV_PATH)
 	$(INSTALL) $< $@
+
+.PHONY: uninstall
+uninstall:
+	systemctl stop SerialLogger.service && systemctl disable SerialLogger.service
+	systemctl disable media-removable.mount
+	systemctl daemon-reload
+	rm -f $(SYSTEMD_FILES)
+	rm -f $(UDEV_FILES)
+	rm -rf $(BUILD_PATH)
 
 .PHONY: clean
 clean:

@@ -1,3 +1,16 @@
+Automated Installation with (GNU) Make:
+---------------------------------------
+run:
+```
+make install
+systemctl start SerialLogger
+```
+
+
+
+Manual Installation:
+--------------------
+
 Installation Directories:
 90-removable-usb.rules -> /etc/udev/rules.d/90-removable-usb.rules
 media-removable.mount -> /etc/systemd/system/media-removable.mount
