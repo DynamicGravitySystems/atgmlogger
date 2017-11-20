@@ -46,13 +46,18 @@ Dynamic Gravity Systems - Serial Data Recorder
 	
 	2. Installing Python3.6 (armhf) from precompiled binary:
 		- e.g. Built on another raspberry pi and zipped.
-	3. Configure Raspberry Pi GPIO Console:
+	3. **Configure Raspberry Pi GPIO Console:**
 		- By default the Raspberry Pi GPIO console is enabled as a TTY terminal, this needs to be disabled to allow it 
 		to be used as a Serial Data input.
 		- Modify /boot/cmdline.txt removing the section similar to: 'console=serial0,115200'
- 		```commandline
-		sed -i -e s/console=serial0,115200//g /boot/cmdline.txt
-		``` 
+			
+			```commandline(bash)
+				# All Commands executed as Root (sudo)
+				sed -i -e s/console=serial0,115200//g /boot/cmdline.txt
+				echo 'enable_uart=1' >> /boot/config.txt
+				systemctl stop serial-getty@ttyS0.service
+				systemctl disable serial-getty@ttyS0.service
+			``` 
  	
 3. Installation:
 	Use the provided makefile to install the Serial Data Recorder program on a Raspberry PI microcomputer. (See the code snippet below)
