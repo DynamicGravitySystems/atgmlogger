@@ -18,10 +18,10 @@ import argparse
 import functools
 import threading
 import subprocess
+from datetime import datetime
 
 import yaml
 
-from datetime import datetime
 
 import serial
 try:
@@ -49,19 +49,23 @@ def convert_gps_time(gpsweek: int, gpsweekseconds: float):
     Simplified method from DynamicGravityProcessor application:
     https://github.com/DynamicGravitySystems/DGP
 
-    Converts a GPS time format (weeks + seconds since 6 Jan 1980) to a UNIX timestamp
-    (seconds since 1 Jan 1970) without correcting for UTC leap seconds.
+    Converts a GPS time format (weeks + seconds since 6 Jan 1980) to a UNIX
+    timestamp (seconds since 1 Jan 1970) without correcting for UTC leap
+    seconds.
 
-    Static values gps_delta and gpsweek_cf are defined by the below functions (optimization)
-    gps_delta is the time difference (in seconds) between UNIX time and GPS time.
-    gps_delta = (dt.datetime(1980, 1, 6) - dt.datetime(1970, 1, 1)).total_seconds()
+    Static values gps_delta and gpsweek_cf are defined by the below functions
+    (optimization)
+    gps_delta is the time difference (in seconds) between UNIX time and GPS time
+    gps_delta = (dt.datetime(1980,1,6) - dt.datetime(1970,1,1)).total_seconds()
 
     gpsweek_cf is the coefficient to convert weeks to seconds
     gpsweek_cf = 7 * 24 * 60 * 60  # 604800
 
-    :param gpsweek: Number of weeks since beginning of GPS time (1980-01-06 00:00:00)
+    :param gpsweek: Number of weeks since beginning of GPS time
+        (1980-01-06 00:00:00)
     :param gpsweekseconds: Number of seconds since the GPS week parameter
-    :return: (float) unix timestamp (number of seconds since 1970-01-01 00:00:00)
+    :return: (float) unix timestamp
+        number of seconds since 1970-01-01 00:00:00
     """
     # GPS time begins 1980 Jan 6 00:00, UNIX time begins 1970 Jan 1 00:00
     gps_delta = 315964800.0
@@ -96,25 +100,28 @@ def _runhook(func):
     return wrapper
 
 
-def _filehook(pattern):
+def _filehook(pattern, priority=-1):
     def inner(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
         wrapper.filehook = pattern
+        wrapper.priority = priority
         return wrapper
     return inner
 
 
 class RemovableStorageHandler(threading.Thread):
-    def __init__(self, logdir, mount_path, gpio_h, poll_interval=.5,
-                 copy_level='all', verbosity=0):
+    def __init__(self, logdir, mount_path, gpio_h: GpioHandler,
+                 poll_interval=.5, copy_level='all', verbosity=0):
+        self.log = logging.getLogger()
         super(RemovableStorageHandler, self).__init__(name='RemovableStorageHandler')
         copy_level_map = {'all': '*.*', 'application': '*.log*', 'data': '*.dat*'}
 
         self.run_hooks = []
         self.file_hooks = {}
-        # Inspect class for functions with attribute runhook/filehook and append to respective hook list
+        # Inspect class for functions with attribute runhook/filehook and append
+        # to respective hook list
         for member in self.__class__.__dict__.values():
             if hasattr(member, 'runhook'):
                 self.run_hooks.append(functools.partial(member, self))
@@ -126,7 +133,6 @@ class RemovableStorageHandler(threading.Thread):
         self.device = mount_path
         self.gpio_h = gpio_h
         self.poll_int = poll_interval
-        self.log = logging.getLogger()
         self.verbosity = verbosity
         self.exit_signal = threading.Event()
 
@@ -141,7 +147,8 @@ class RemovableStorageHandler(threading.Thread):
             self.log.info('{} Initialized'.format(self.__class__.__name__))
 
     @staticmethod
-    def write_file(dest, *args, append=True, encoding='utf-8', delim=': ', eol='\n', **kwargs):
+    def write_file(dest, *args, append=True, encoding='utf-8', delim=': ',
+                   eol='\n', **kwargs):
         """Write or append arbitrary data to specified dest file."""
         mode = {True: 'w+', False: 'w'}[append]
         lines = []
@@ -203,9 +210,11 @@ class RemovableStorageHandler(threading.Thread):
 
         ext = {'zip': '.zip', 'tar': '.tar'}
         tar_ext = {'lzma': '.lz', 'gzip': '.gz', 'bzip': '.bz2'}
-        cmp_modes = {'zip': {None: zipfile.ZIP_STORED, 'lzma': zipfile.ZIP_LZMA, 'bzip': zipfile.ZIP_BZIP2,
+        cmp_modes = {'zip': {None: zipfile.ZIP_STORED, 'lzma': zipfile.ZIP_LZMA,
+                             'bzip': zipfile.ZIP_BZIP2,
                              'zlib': zipfile.ZIP_DEFLATED},
-                     'tar': {None: '', 'lzma': 'xz', 'gzip': 'gz', 'bzip': 'bz2', 'bzip2': 'bz2'}
+                     'tar': {None: '', 'lzma': 'xz', 'gzip': 'gz',
+                             'bzip': 'bz2', 'bzip2': 'bz2'}
                      }
 
         if method not in ext.keys():
@@ -216,7 +225,8 @@ class RemovableStorageHandler(threading.Thread):
             path = os.path.abspath(os.path.join(path, arcname))
 
         if compression and compression not in cmp_modes[method].keys():
-            log.warning("Invalid compression method: '{}' defaulting to None for target: {}".format(compression, path))
+            log.warning("Invalid compression method: '{}' defaulting to None "
+                        "for target: {}".format(compression, path))
             compression = None
 
         inputs = []
@@ -228,7 +238,8 @@ class RemovableStorageHandler(threading.Thread):
             try:
                 with zipfile.ZipFile(path, mode="w", compression=cmp_modes[method][compression]) as zf:
                     for file in inputs:
-                        zf.write(os.path.abspath(file), arcname=os.path.basename(file))
+                        zf.write(os.path.abspath(file),
+                                 arcname=os.path.basename(file))
             except FileExistsError:
                 log.exception("Zipfile already exists")
                 return None
@@ -254,17 +265,20 @@ class RemovableStorageHandler(threading.Thread):
     @_filehook(r'(dgs)?diag(nostics)?\.?(txt|trigger|dat)?')
     def run_diag(self, match):
         """
-        Execute series of diagnostic commands and return dictionary of results in form dict[cmd] = result
+        Execute series of diagnostic commands and return dictionary of
+        results in form dict[cmd] = result
         """
         self.log.debug("Running diagnostics on system")
         diag_cmds = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
-        diag = {'Diagnostic Timestamp': time.strftime(self.datetime_fmt, time.gmtime(time.time()))}
+        diag = {'Diagnostic Timestamp': time.strftime(self.datetime_fmt,
+                                                      time.gmtime(time.time()))}
         for cmd in diag_cmds:
             try:
                 output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
                 diag[cmd] = output
             except FileNotFoundError:
-                self.log.warning('Command: {} not available on this system.'.format(cmd))
+                self.log.warning('Command: %s not available on this system.',
+                                 cmd)
                 continue
 
         if self.verbosity > 2:
@@ -274,20 +288,22 @@ class RemovableStorageHandler(threading.Thread):
                     cpuinfo = fd.read()
                 diag[proc_cpuinfo] = cpuinfo
             except FileNotFoundError:
-                self.log.warning('{} not available on this system.'.format(proc_cpuinfo))
+                self.log.warning('{} not available on this system.'
+                                 .format(proc_cpuinfo))
 
-        self.write_file(os.path.join(self.last_copy_path, 'diag.txt'), delim=':\n', **diag)
+        self.write_file(os.path.join(self.last_copy_path, 'diag.txt'),
+                        delim=':\n', **diag)
 
     @_filehook(r'config.ya?ml')
     def update_config(self, match, *args):
-        """Copy new configuration file from USB and reload program configuration"""
+        """Copy new configuration file from USB and reload program config"""
         # src = os.path.abspath(os.path.join(self.device, match))
         self._backup_file('./config.yaml')
         raise NotImplementedError
 
     @_filehook(r'log(ging)?.ya?ml')
     def update_log_config(self, match, *args):
-        """Copy new configuration file from USB and reload logging configuration"""
+        """Copy new configuration file from USB and reload logging config"""
         print("Performing logging config update")
         raise NotImplementedError
 
@@ -295,15 +311,23 @@ class RemovableStorageHandler(threading.Thread):
     def clear_logs(self, match, *args):
         """
         Clear old log files from the device
-        Warning: If we delete ALL logs, the logging interface must be reinitialized.
+        Warning: If we delete ALL logs, the logging interface must be
+        reinitialized.
         """
         # Experimental
         # TODO: Add a lock to manage contention between file copy function.
         self.log.debug("Clearing all old logs (except current) on USB command.")
-        # TODO: Delete the clear.txt file from usb drive when done (use match for correct fname)
-        log_files =''
-        # shutil.rmtree(self.log_dir)
-        # os.mkdir(self.log_dir)
+        data_pattern = "*.dat.*"
+        logs = glob.glob(os.path.join(self.log_dir, data_pattern))
+        for file in logs:
+            os.remove(file)
+        applog_pattern = "*.log.*"
+        applogs = glob.glob(os.path.join(self.log_dir, applog_pattern))
+        for file in applogs:
+            os.remove(file)
+
+        # Remove the clear.txt file
+        os.remove(os.path.join(self.device, match))
 
     @_runhook
     def copy_logs(self):
@@ -342,19 +366,25 @@ class RemovableStorageHandler(threading.Thread):
                 self.log.info("Copied file %s to %s", file, dest_file)
             except OSError:
                 # self.err_signal.set()
-                self.log.exception("Exception encountered while copying log file.")
+                self.log.exception("Exception encountered copying log file.")
                 return 1
 
         self.last_copy_path = dest_dir
         self.last_copy_time = time.time()
-        self.last_copy_stats = {'Total Copy Size (KiB)': copy_size, 'Files Copied': file_list,
-                                'Destination Directory': dest_dir, 'Last Copy Time': self.last_copy_time}
-        self.log.info("All log files in pattern %s copied successfully", self.copy_pattern)
+        self.last_copy_stats = {'Total Copy Size (KiB)': copy_size,
+                                'Files Copied': file_list,
+                                'Destination Directory': dest_dir,
+                                'Last Copy Time': self.last_copy_time}
+        self.log.info("All log files in pattern %s copied successfully",
+                      self.copy_pattern)
         return 0
 
     @_runhook
     def watch_files(self):
-        """List files on the device path, to check for anything we should take action on, e.g. config update"""
+        """
+        List files on the device path, to check for anything we should take
+        action on, e.g. config update
+        """
         root_files = [file.name for file in os.scandir(self.device) if file.is_file()]
         flist = " ".join(root_files)
         for pattern in self.file_hooks:
@@ -371,7 +401,8 @@ class RemovableStorageHandler(threading.Thread):
             print(result)
         except OSError:
             result = None
-            log.exception("Error occured while attempting to unmount device: {}".format(mount_path))
+            log.exception("Error occured while attempting to unmount device: {}"
+                          .format(mount_path))
         return result
 
     def exit(self, join=False):
@@ -381,9 +412,10 @@ class RemovableStorageHandler(threading.Thread):
 
     def run(self):
         """
-        Target function for usb transfer thread. This function polls for the presence of a filesystem at an arbitrary
-        mount point, and if it detects one it attempts to copy any relevant log/data files from the local SD card
-        storage.
+        Target function for usb transfer thread. This function polls for the
+        presence of a filesystem at an arbitrary mount point, and if it
+        detects one it attempts to copy any relevant log/data files from the
+        local SD card storage.
         :return:
         """
         while not self.exit_signal.is_set():
@@ -393,7 +425,7 @@ class RemovableStorageHandler(threading.Thread):
 
             # Else:
             self.log.info("USB device detected at {}".format(self.device))
-            self.gpio_h.blink(15, -1, .05)  # TODO: This needs to be fixed so as not to hardcode the pin num here
+            self.gpio_h.blink(self.gpio_h.pin_usb, -1, .05)
 
             for run_hook in self.run_hooks:
                 run_hook()
@@ -421,11 +453,13 @@ class GpioHandler(threading.Thread):
         self.queue = queue.Queue(queue_size)
 
         if not gpio:
-            self.log.warning("RPi.GPIO Module is not available. GpioHandling disabled.")
+            self.log.warning("RPi.GPIO Module is not available.GPIO Output "
+                             "Disabled")
             self._init = False
             return
 
-        self.mode = {'board': gpio.BOARD, 'bcm': gpio.BCM}[config.get('mode', 'board')]
+        self.mode = {'board': gpio.BOARD, 'bcm': gpio.BCM}[config.get('mode',
+                                                                      'board')]
 
         self.pin_data = int(config['data_led'])
         self.pin_usb = int(config['usb_led'])
@@ -439,7 +473,8 @@ class GpioHandler(threading.Thread):
         self._setup(self.outputs, gpio.OUT)
         self._setup(self.inputs, gpio.IN)
         self._init = True
-        self.log.debug("GpioHandler initialized with data_led = {}".format(self.pin_data))
+        self.log.debug("GpioHandler initialized with data_led = {}"
+                       .format(self.pin_data))
 
     @staticmethod
     def _setup(pins, mode):
@@ -469,7 +504,7 @@ class GpioHandler(threading.Thread):
         :return:
         """
         if led not in self.outputs:
-            # Prevent runtime error if invalid pin is triggered which has not been initialized
+            # Prevent runtime error if uninitialized pin is called
             return False
 
         # Condense parameters into a tuple
@@ -494,15 +529,17 @@ class GpioHandler(threading.Thread):
 
     def exit(self, join=False):
         """
-        Exit the GpioHandler thread by setting the _exit signal, clearing the current queue,
-        then putting an "exit" on the queue (otherwise the loop will block until an item is avail).
+        Exit the GpioHandler thread by setting the _exit signal, clearing the
+        current queue, then putting an "exit" on the queue (otherwise the
+        loop will block until an item is avail).
         """
         if not self.is_alive():
             return True
         self.log.info("Exit called on thread:{} id:{}".format(self.name, self.ident))
         self._exit.set()
         self.clear()
-        self.queue.put(None, False)  # Put an empty item on queue to force continue
+        # Put an empty item on queue to force continue
+        self.queue.put(None, False)
         # Turn off all initialized pins
         if join:
             self.join()
@@ -512,7 +549,8 @@ class GpioHandler(threading.Thread):
         If persistent blink is set, then blink the specified LED until it is unset
         else:
         Wait for an intermittent blink
-        priority is not currently evaluated, a thread can force a blink using the force param in blink()
+        priority is not currently evaluated, a thread can force a blink using
+        the force param in blink()
 
         :return:
         """
@@ -530,10 +568,11 @@ class GpioHandler(threading.Thread):
             if count == 0:
                 continue
             elif count-1 != 0:
-                # If the decremented count is not 0 we'll put it back on the queue to run again
+                # If the decremented count is not 0 we'll put it back on queue
                 self.blink(pin, count-1, freq, priority, force=False)
             elif self._resume:
-                # If the decremented count is 0, and we have an item to resume, put the resume item on the queue
+                # If the decremented count is 0, and we have an item to resume,
+                # put the resume item on the queue
                 self.blink(*self._resume)
 
             self._output(pin, freq)
@@ -554,9 +593,11 @@ class SerialLogger(threading.Thread):
         parser.add_argument('-V', '--version', action='version',
                             version='0.1')
         parser.add_argument('-v', '--verbose', action='count')
-        parser.add_argument('-l', '--logdir', action='store', default='/var/log/dgs')
+        parser.add_argument('-l', '--logdir', action='store',
+                            default='/var/log/dgs')
         parser.add_argument('-d', '--device', action='store')
-        parser.add_argument('-c', '--configuration', action='store', default='config.yaml')
+        parser.add_argument('-c', '--configuration', action='store',
+                            default='config.yaml')
         args = parser.parse_args(argv[1:])
 
         # Default settings in the event of missing config.yaml file.
@@ -595,7 +636,7 @@ class SerialLogger(threading.Thread):
         self.c_signal = config.get('signal', defaults['signal'])
 
         self.thread_poll_interval = 1   # Seconds to sleep between run loops
-        self.usb_poll_interval = 3  # Seconds to sleep between checking for USB device
+        self.usb_poll_interval = 2  # Seconds to sleep between checking for USB
 
         # Logging definitions
         if args.logdir is None:
@@ -629,8 +670,10 @@ class SerialLogger(threading.Thread):
 
         # Initialize Utility threads, but don't start them
         gpioh = GpioHandler(self.c_signal)
-        self.data_signal = functools.partial(gpioh.blink, self.c_signal['data_led'], 1, 0.01)
-        self.no_data_signal = functools.partial(gpioh.blink, self.c_signal['aux_led'], 1, 0.1)
+        self.data_signal = functools.partial(gpioh.blink,
+                                             self.c_signal['data_led'], 1, 0.01)
+        self.no_data_signal = functools.partial(gpioh.blink,
+                                                self.c_signal['aux_led'], 1, 0.1)
         self.threads.append(gpioh)
 
         rsh_opts = {
@@ -667,8 +710,6 @@ class SerialLogger(threading.Thread):
             with open(os.path.abspath(config_path), 'r') as config_raw:
                 config_dict = yaml.load(config_raw)
         except OSError:
-            # print("Exception encountered loading configuration file, proceeding with defaults.")
-            # print(e.__repr__())
             config_dict = default_opts
         return config_dict
 
@@ -707,7 +748,7 @@ class SerialLogger(threading.Thread):
 
     def clean_exit(self):
         """
-        Force a clean exit from the program, joining all threads before returning.
+        Force a clean exit from the program, join all threads before returning.
         :return: Int exit_code
         """
         self.exit_signal.set()
@@ -740,8 +781,9 @@ class SerialLogger(threading.Thread):
 
     def get_handle(self, **kwargs):
         se_handle = serial.Serial(**kwargs)
-        self.log.info("Opened serial handle - device:{port} baudrate:{baudrate}, parity:{parity}, "
-                      "stopbits:{stopbits}, bytesize:{bytesize}".format(**kwargs))
+        self.log.info("Opened serial handle - device:{port} baudrate:{baudrate}"
+                      ", parity:{parity}, stopbits:{stopbits}, "
+                      "bytesize:{bytesize}".format(**kwargs))
         return se_handle
 
     def run(self):
@@ -753,11 +795,12 @@ class SerialLogger(threading.Thread):
         try:
             se_handle = self.get_handle(**self.c_serial)
         except serial.SerialException:
-            self.log.exception("Error opening serial port for listening, terminating execution.")
+            self.log.exception("Error opening serial port for listening, "
+                               "terminating execution.")
             return 1
 
         self.log.debug("Entering SerialLogger main loop.")
-        self.log.info("<< Current Time. Clock is not synchrnozied, waiting for GPS data.")
+        self.log.info("Clock is not synchrnozied, waiting for GPS data.")
         tick = 0
         while not self.exit_signal.is_set():
             if self.reload_signal.is_set():
@@ -784,8 +827,8 @@ class SerialLogger(threading.Thread):
                 self.data_signal()
                 self.data_interval = time.time() - self.last_data
                 self.last_data = time.time()
-                self.log.debug("Last data received at {} UTC".format(time.strftime("%H:%M:%S",
-                                                                                   time.gmtime(self.last_data))))
+                self.log.debug("Last data received at {} UTC".format(
+                    time.strftime("%H:%M:%S", time.gmtime(self.last_data))))
                 self.log.debug(data)
 
                 if not self.time_synced and (tick > self.last_time_check + 10):
@@ -821,6 +864,7 @@ class SerialLogger(threading.Thread):
                                   .format(ts=timestamp))
                     set_time(timestamp)
                     self.time_synced = True
+                    self.log.info("System time set.")
 
             except serial.SerialException:
                 self.log.exception("Exception encountered attempting to call "

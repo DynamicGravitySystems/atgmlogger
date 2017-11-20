@@ -40,6 +40,9 @@ system/SerialLogger.service:
 .PHONY: install
 install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
 	@if [ -z "$(DESTDIR)" ]; then\
+		@if ! grep -q ^enable_uart=1 /boot/config.txt; then\
+			echo "enable_uart=1" >> /boot/config.txt\
+		fi; \
 		sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt; \
 		systemctl stop SerialLogger.service; \
 		$(PIP) install -r requirements.txt; \

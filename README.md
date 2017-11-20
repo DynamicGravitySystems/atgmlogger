@@ -50,12 +50,13 @@ Dynamic Gravity Systems - Serial Data Recorder
 		- By default the Raspberry Pi GPIO console is enabled as a TTY terminal, this needs to be disabled to allow it 
 		to be used as a Serial Data input.
 		- Modify /boot/cmdline.txt removing the section similar to: 'console=serial0,115200'
-			```commandline
-			All Commands executed as Root (sudo)
-			sed -i -e s/console=serial0,115200//g /boot/cmdline.txt
-			echo 'enable_uart=1' >> /boot/config.txt
-			systemctl stop serial-getty@ttyS0.service
-			systemctl disable serial-getty@ttyS0.service
+			
+			```commandline(bash)
+				# All Commands executed as Root (sudo)
+				sed -i -e s/console=serial0,115200//g /boot/cmdline.txt
+				echo 'enable_uart=1' >> /boot/config.txt
+				systemctl stop serial-getty@ttyS0.service
+				systemctl disable serial-getty@ttyS0.service
 			``` 
  	
 3. Installation:
