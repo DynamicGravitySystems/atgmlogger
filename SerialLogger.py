@@ -100,19 +100,18 @@ def _runhook(func):
     return wrapper
 
 
-def _filehook(pattern, priority=-1):
+def _filehook(pattern):
     def inner(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             return func(*args, **kwargs)
         wrapper.filehook = pattern
-        wrapper.priority = priority
         return wrapper
     return inner
 
 
 class RemovableStorageHandler(threading.Thread):
-    def __init__(self, logdir, mount_path, gpio_h: GpioHandler,
+    def __init__(self, logdir, mount_path, gpio_h: 'GpioHandler',
                  poll_interval=.5, copy_level='all', verbosity=0):
         self.log = logging.getLogger()
         super(RemovableStorageHandler, self).__init__(name='RemovableStorageHandler')
@@ -307,7 +306,7 @@ class RemovableStorageHandler(threading.Thread):
         print("Performing logging config update")
         raise NotImplementedError
 
-    @_filehook(r'^\.?clear(\.txt)?$')
+    @_filehook(r'clear(\.txt)?')
     def clear_logs(self, match, *args):
         """
         Clear old log files from the device
@@ -327,7 +326,9 @@ class RemovableStorageHandler(threading.Thread):
             os.remove(file)
 
         # Remove the clear.txt file
-        os.remove(os.path.join(self.device, match))
+        clear_file = os.path.join(self.device, match)
+        self.log.warning("Removing clear trigger: {}".format(clear_file))
+        os.remove(clear_file)
 
     @_runhook
     def copy_logs(self):
@@ -818,7 +819,8 @@ class SerialLogger(threading.Thread):
                 data = self.decode(se_handle.readline())
                 tick += 1
                 if data == '':
-                    self.no_data_signal()  # Call partial function to blink LED every 1 second (timeout) if no data
+                    # Call partial function to blink LED every 1 second if no data
+                    self.no_data_signal()
                     continue
                 if data is None:
                     continue
@@ -862,9 +864,9 @@ class SerialLogger(threading.Thread):
                         timestamp = dt.timestamp()
                     self.log.info("Setting system time to: UNIX({ts})"
                                   .format(ts=timestamp))
-                    set_time(timestamp)
+                    result = set_time(timestamp)
                     self.time_synced = True
-                    self.log.info("System time set.")
+                    self.log.info("System time set. Output: {}".format(result))
 
             except serial.SerialException:
                 self.log.exception("Exception encountered attempting to call "
