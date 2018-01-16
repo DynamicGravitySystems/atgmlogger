@@ -3,3 +3,4 @@
 data.txt
 *.dat
 __pycache__/*
+venv/*
