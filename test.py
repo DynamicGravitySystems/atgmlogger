@@ -1,6 +1,6 @@
 import unittest
 import unittest.mock as mock
-import SerialLogger
+import threading
 import logging
 import tempfile
 import yaml
@@ -11,9 +11,71 @@ import os
 import zipfile
 import tarfile
 import time
+import queue
+import serial
+
+import at1listener
+import SerialLogger
 
 
-class TestSerialLogger(unittest.TestCase):
+def consumer(in_q, result, exiting):
+    while not exiting.is_set():
+        try:
+            data = in_q.get(block=True, timeout=.05)
+            if data:
+                result.append(data)
+        except queue.Empty:
+            continue
+
+
+class CustomLogger:
+    def __init__(self):
+        self.accumulator = list()
+
+    def log(self, data):
+        self.accumulator.append(data)
+
+
+class TestSerialIO(unittest.TestCase):
+    def setUp(self):
+        self.handle = serial.serial_for_url('loop://',
+                                            baudrate=57600,
+                                            timeout=.1)
+        self.exit = threading.Event()
+        self.s = at1listener.AT1Listener(self.handle, self.exit)
+        self.logger = CustomLogger()
+
+    def test_at1logger(self):
+
+        listen_th = threading.Thread(target=self.s.listen, name='listener')
+
+        cmd_listener = at1listener.CommandListener(self.s.commands, self.s.exiting)
+        writer = at1listener.DataWriter(self.s.output, self.logger,
+                                        self.s.exiting)
+
+        print("Starting listen thread")
+        listen_th.start()
+        print("Starting consumer thread")
+        writer.start()
+        cmd_listener.start()
+        in_list = list()
+        for i in range(0, 1001):
+            decoded = "Line: {}".format(i)
+            data = "Line: {}\n".format(i).encode('latin-1')
+            in_list.append(decoded)
+            self.handle.write(data)
+
+        time.sleep(.05)
+        self.s.exiting.set()
+        listen_th.join()
+        writer.join()
+
+        self.assertListEqual(in_list, writer._internal_copy)
+        self.assertListEqual(in_list, self.logger.accumulator)
+
+
+@unittest.SkipTest
+class TestUtilityClasses(unittest.TestCase):
     def setUp(self):
         self.sl = SerialLogger.SerialLogger
         self.sl_args = ['test.py', '-vvv', '--logdir=./logs']
