@@ -15,6 +15,7 @@ import shutil
 import logging
 import functools
 import subprocess
+import multiprocessing
 from pathlib import Path
 
 from typing import List
@@ -91,8 +92,9 @@ def _filehook(pattern):
     return inner
 
 
-class USBListener:
-    def __init__(self, usb_path, log_dir):
+class USBDispatcher(multiprocessing.Process):
+    def __init__(self, usb_path, log_dir, gpio_queue=None):
+        super().__init__(name=self.__class__.__name__)
 
         self.devpath = Path(usb_path)
         self.log_dir = Path(log_dir)

@@ -99,6 +99,7 @@ def send(handle, data: List, interval=1.0, count=None,
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog="send", description="Send arbitrary data over a serial port")
+    parser.add_argument('-d', '--device', type=str, default=None)
     parser.add_argument('-c', '--count', type=int, default=None)
     parser.add_argument('-r', '--repeat', action='store_true')
     parser.add_argument('-i', '--interval', type=float, default=1.0)
@@ -106,7 +107,7 @@ if __name__ == '__main__':
 
     opts = parser.parse_args(sys.argv[1:])
 
-    hdl = get_at1_handle()
+    hdl = get_at1_handle(opts.device)
 
     path = Path(opts.file)
     if not path.exists():

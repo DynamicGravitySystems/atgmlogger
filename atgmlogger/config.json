@@ -1,14 +1,15 @@
 {
   "version": 0.4,
   "serial": {
-    "device": "/dev/serial0",
+    "port": "/dev/serial0",
     "baudrate": 57600,
     "bytesize": 8,
     "parity": "N",
     "stopbits": 1,
-    "timeout": 0.1
+    "timeout": 1
   },
   "logging": {
+    "logconfig": "logging.json",
     "logdir": "/var/log/dgs"
   },
   "usb": {
