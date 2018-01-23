@@ -1,3 +1,5 @@
+# coding: utf-8
+
 import sys
 import json
 import shlex
@@ -7,23 +9,50 @@ import subprocess
 from typing import Union
 from pathlib import Path
 
+from atgmlogger import applog
+
 __all__ = ['get_json_config', 'decode', 'convert_gps_time',
-           'timestamp_from_data', 'set_system_time']
+           'timestamp_from_data', 'set_system_time', 'Blink']
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
 JSON_CONFIG = Path('config.json')
 
 
 def get_json_config(path=None):
+    """
+    Load a configuration dictionary from JSON formatted file at 'path'.
+    If configuration file is not specified, the application default is tried
+    'JSON_CONFIG'.
+    If path does not exist, or JSON Decode fails (invalid JSON syntax),
+    an empty configuration dictionary is returned.
+        The empty configuration dictionary defines the common keys,
+        with empty dictionaries as their value.
+
+    Parameters
+    ----------
+    path : Path
+        Path to JSON configuration file. If not specified, module default is
+        used.
+
+    Returns
+    -------
+    dict
+        Configuration dictionary
+
+    """
+    empty_config = dict(logging={},
+                        usb={},
+                        gpio={})
     path = Path(path) or JSON_CONFIG
     if not path.exists():
-        return {}
+        applog.warning("Configuration files does not exist.")
+        return dict()
     try:
         with path.open('r') as fd:
             config = json.load(fd)
     except json.JSONDecodeError:
-        print("Error decoding JSON config")
-        return {}
+        print("Error decoding JSON config, returning empty config.")
+        return dict()
     else:
         return config
 
@@ -130,3 +159,14 @@ def set_system_time(timestamp):
     else:
         print("set_system_time not supported on this platform.")
         return None
+
+
+class Blink:
+    def __init__(self, led, priority=5, frequency=0.1):
+        self.led = led
+        self.priority = priority
+        self.frequency = frequency
+
+    def __lt__(self, other):
+        return self.priority < other.priority
+

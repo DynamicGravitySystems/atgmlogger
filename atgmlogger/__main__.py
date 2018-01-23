@@ -1,6 +1,12 @@
-import sys
-from .atgmlogger import main
+#! /usr/bin/python3
+# -*- encoding: utf-8 -*-
 
-if __name__ == "__main__":
-    """ATGM Logger Main Entry Point."""
-    sys.exit(main(sys.argv))
+import sys
+from .atgmlogger import run
+
+
+def main(*args):
+    if args is None:
+        args = sys.argv
+
+    return run(*args)

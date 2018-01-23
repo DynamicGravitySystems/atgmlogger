@@ -10,18 +10,14 @@ import re
 import sys
 import time
 import uuid
-import queue
 import shutil
-import logging
 import functools
+import threading
 import subprocess
-import multiprocessing
 from pathlib import Path
-
 from typing import List
 
-
-_log = logging.getLogger(__name__)
+from atgmlogger import applog
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -57,26 +53,29 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
     if prefix:
         dir_name = prefix[:5]+dir_name
 
-    illegals = '\\:<>?*/\"'  # Illegal filename characters
+    illegals = '\\:<>?*/\"'  # Illegal characters
     dir_name = "".join([c for c in dir_name if c not in illegals])
     return dir_name
 
 
 def umount(path):
+    if sys.platform == 'win32':
+        applog.warning("umount not supported on Windows Platform")
+        return -1
     try:
         result = subprocess.check_output(['/bin/umount', str(path)])
     except OSError:
         result = 1
-        _log.exception("Error occurred attempting to un-mount device: {}"
-                       .format(path))
+        applog.exception("Error occurred attempting to un-mount device: {}"
+                         .format(path))
     return result
 
 
 def _runhook(priority=5):
     def inner(func):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        def wrapper(self, *args, **kwargs):
+            return func(self, *args, **kwargs)
         wrapper.runhook = priority
         return wrapper
     return inner
@@ -85,14 +84,18 @@ def _runhook(priority=5):
 def _filehook(pattern):
     def inner(func):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+        def wrapper(self, *args, **kwargs):
+            return func(self, *args, **kwargs)
         wrapper.filehook = pattern
         return wrapper
     return inner
 
 
-class USBDispatcher(multiprocessing.Process):
+class RemovableStorageHandler(threading.Thread):
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls)
+        pass
+
     def __init__(self, usb_path, log_dir, gpio_queue=None):
         super().__init__(name=self.__class__.__name__)
 
@@ -102,22 +105,43 @@ class USBDispatcher(multiprocessing.Process):
             self.log_dir = self.log_dir.parent
 
         self._copy_globs = ['*.dat', '*.log']
-        self._run_hooks = queue.PriorityQueue()
-        self._file_hooks = dict()
         self._current_path = None
         self._last_copy_time = None
+        self._umount_flag = threading.Event()
 
+        self._run_hooks = list()
+        self._file_hooks = dict()
         for member in self.__class__.__dict__.values():
+            # Inspect for decorated methods
             if hasattr(member, 'runhook'):
-                self._run_hooks.put_nowait((member.runhook,
-                                            functools.partial(member, self)))
+                self._run_hooks.append(self.__getattribute__(member.__name__))
             elif hasattr(member, 'filehook'):
-                self._file_hooks[member.filehook] = functools.partial(member,
-                                                                      self)
+                self._file_hooks[member.filehook] = self.__getattribute__(
+                    member.__name__)
+
+    def run(self):
+        if not os.path.ismount(self.devpath):
+            applog.error("{path} is not mounted or is not a valid mount point."
+                         .format(path=self.devpath))
+            return 1
+
+        for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
+            th = threading.Thread(target=functor)
+            th.start()
+            th.join()
+
+        try:
+            os.sync()
+        except AttributeError:
+            # os.sync is not available on Windows
+            pass
+        finally:
+            umount(self.devpath)
 
     @_runhook(priority=1)
     def copy_logs(self):
-        _log.debug("Processing copy_logs")
+        print("Copy Logs Called")
+        applog.debug("Processing copy_logs")
         file_list = []  # type: List[Path]
         copy_size = 0   # Accumulated size of logs in bytes
 
@@ -127,7 +151,8 @@ class USBDispatcher(multiprocessing.Process):
         for file in file_list:
             copy_size += file.stat().st_size
 
-        _log.info("Total log size to be copied: {} KiB".format(copy_size/1024))
+        applog.info("Total log size to be copied: {} KiB".format(
+            copy_size/1024))
 
         def get_free(path):
             try:
@@ -137,7 +162,7 @@ class USBDispatcher(multiprocessing.Process):
             return statvfs.f_bsize * statvfs.f_bavail
 
         if copy_size > get_free(self.devpath):
-            _log.warning("Total size of datafiles to be copied is greater "
+            applog.warning("Total size of datafiles to be copied is greater "
                          "than free-space on device.")
 
         dest_dir = self.devpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
@@ -150,10 +175,9 @@ class USBDispatcher(multiprocessing.Process):
 
             try:
                 shutil.copy(src_path, dest_path)
-                _log.info("Copied file %s to %s", fname, dest_path)
+                applog.info("Copied file %s to %s", fname, dest_path)
             except OSError:
-                # self.err_signal.set()
-                _log.exception("Exception encountered copying log file.")
+                applog.exception("Exception encountered copying log file.")
                 continue
 
         self._current_path = dest_dir
@@ -161,37 +185,16 @@ class USBDispatcher(multiprocessing.Process):
 
     @_runhook(priority=2)
     def watch_files(self):
-        _log.debug("Processing watch_files")
+        applog.debug("Processing watch_files")
         root_files = [file.name for file in self.devpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)
         for pattern in self._file_hooks.keys():
             match = re.search(pattern, files)
             if match:
-                self._file_hooks[pattern](match.group())
+                self._file_hooks[pattern](self, match.group())
 
-    def run(self):
-        if not os.path.ismount(self.devpath):
-            _log.error("{path} is not mounted or is not a valid mount point."
-                       .format(path=self.devpath))
-            return 1
-
-        while True:
-            try:
-                functor = self._run_hooks.get_nowait()
-            except queue.Empty:
-                break
-            else:
-                res = functor.__call__()
-
-        try:
-            os.sync()
-        except AttributeError:
-            # os.sync is not supported on Windows
-            pass
-
-        return umount(self.devpath)
-
-
-if __name__ == '__main__':
-    sys.exit(USBListener('/media/removable', '/var/log/dgs').run())
+    @_filehook('^clear(\.txt)?')
+    def clear_logs(self, pattern):
+        print("self is: ", self)
+        print("pattern is: ", pattern)

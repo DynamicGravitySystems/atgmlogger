@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# -*- encoding: utf-8 -*-
 
 """
 Advanced Technology Gravity Meter - Logger (AGTMlogger)
@@ -15,74 +16,60 @@ import queue
 import logging
 import argparse
 import threading
-import multiprocessing as mp
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 import serial
 try:
     import RPi.GPIO as gpio
+    HAVE_GPIO = True
 except (ImportError, RuntimeError):
-    gpio = None
+    HAVE_GPIO = False
 
-from .helpers import *
-# TODO: Better name for usbdispatcher
-from .usbdispatcher import USBDispatcher
-from atgmlogger import __version__, __description__
+from .common import *
+from .removable import RemovableStorageHandler
+from .logger import DataLogger
+from atgmlogger import __version__, __description__, VERBOSITY_MAP, applog
 
 JOIN_TIMEOUT = 0.1
 POLL_RATE = 1
-# Data Logging Level
+CONFIG_PATH = 'config.json'
 DATA_LVL = 75
-VERBOSITY_MAP = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
-_applog = logging.getLogger(__name__)
-_applog.addHandler(logging.StreamHandler(sys.stderr))
-_applog.setLevel(VERBOSITY_MAP[0])
-
-
-class Blink:
-    def __init__(self, led, priority=5, frequency=0.1):
-        self.led = led
-        self.priority = priority
-        self.frequency = frequency
-
-    def __lt__(self, other):
-        return self.priority < other.priority
 
 
 class GPIOListener(threading.Thread):
     def __init__(self, config, gpio_queue: queue.PriorityQueue, exit_sig):
-        super().__init__(name=self.__class__.__name__)
+        super().__init__(name=self.__class__.__name__, daemon=True)
+        if not HAVE_GPIO:
+            applog.warning("GPIO Module Unavailable on this System.")
+            return
         self._queue = gpio_queue
         self._exiting = exit_sig
 
-        try:
-            modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
-            self._mode = modes[config.get('mode', 'board')]
-        except AttributeError:
-            pass
+        modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
+        self._mode = modes[config.get('mode', 'board')]
         self.data_pin = config.get('data_led', 11)
         self.usb_pin = config.get('usb_led', 13)
 
         self.outputs = [self.data_pin, self.usb_pin]
 
-        try:
-            gpio.setmode(self._mode)
-            for pin in self.outputs:
-                gpio.setup(pin, gpio.OUT)
-        except AttributeError:
-            pass
+        gpio.setmode(self._mode)
+        for pin in self.outputs:
+            gpio.setup(pin, gpio.OUT)
 
-    def blink(self, blink: Blink):
+    def _blink(self, blink: Blink):
         if blink.led not in self.outputs:
             return
-        gpio.output(blink.led, True)
-        time.sleep(blink.frequency)
-        gpio.output(blink.led, False)
-        time.sleep(blink.frequency)
+        if HAVE_GPIO:
+            gpio.output(blink.led, True)
+            time.sleep(blink.frequency)
+            gpio.output(blink.led, False)
+            time.sleep(blink.frequency)
 
     def run(self):
-        if gpio is None:
+        if not HAVE_GPIO:
+            applog.warning("GPIO Module is unavailable. Exiting %s thread.",
+                           self.__class__.__name__)
             return
 
         while not self._exiting.is_set():
@@ -90,28 +77,47 @@ class GPIOListener(threading.Thread):
                 blink = self._queue.get(timeout=.1)  # type: Blink
             except queue.Empty:
                 continue
-            try:
-                self.blink(blink)
-            except AttributeError:
-                pass
-            finally:
-                self._queue.task_done()
+            self._blink(blink)
+            self._queue.task_done()
 
         for pin in self.outputs:
             gpio.output(pin, False)
-        _applog.debug("Exiting GPIOListener thread.")
+        applog.debug("Exiting GPIOListener thread.")
         gpio.cleanup()
 
 
 class Command:
     # TODO: Add on_complete hook? allow firing of lambda on success
-    def __init__(self, command, *cmd_args, priority=None, **cmd_kwargs):
+    """
+    Command class which encapsulates a function and its arguments, to be
+    executed by the CommandListener subscriber.
+
+    Commands may be assigned an int priority where 0 is the highest priority.
+    This class implements the necessary interface to be compatible with the
+    PriorityQueue. e.g.:
+        Command[0] returns the priority
+        Command < OtherCommand returns True if Command.priority <
+        OtherCommand.priority
+
+    The result of the executed function is returned via the execute or call
+    methods to be captured if necessary.
+
+    """
+    def __init__(self, command, *cmd_args, priority=None, name=None,
+                 **cmd_kwargs):
         self.priority = priority or 9
         self.functor = command
+        self.name = name or command.__name__
         self._args = cmd_args
         self._kwargs = cmd_kwargs
 
     def execute(self):
+        return self.functor(*self._args, **self._kwargs)
+
+    def __call__(self, *args, **kwargs):
+        """Alternate syntax to execute()
+        TODO: Allow updating of kwargs via call syntax?
+        """
         return self.functor(*self._args, **self._kwargs)
 
     def __getitem__(self, item):
@@ -143,68 +149,12 @@ class CommandListener(threading.Thread):
                 cmd = self._cmd_queue.get(block=True, timeout=1)
             except queue.Empty:
                 continue
-            try:
-                result = cmd.execute()
-                self._results.append(result)
-            except AttributeError:
-                _applog.exception("Invalid command in Queue, command must "
-                                  "support execute() attribute.")
-            except Exception as e:
-                _applog.exception("Error Executing Command in CommandListener.")
-                continue
-            else:
-                _applog.debug("Command executed without exception.")
-                # Run on_complete hook?
-                pass
-            finally:
-                self._cmd_queue.task_done()
-        _applog.debug("Exiting CommandListener thread.")
+            result = cmd.execute()
+            self._results.append(result)
+            applog.debug("Command executed without exception.")
+            self._cmd_queue.task_done()
 
-
-class DataWriter(threading.Thread):
-    """
-    Parameters
-    ----------
-    data_queue : queue.Queue
-    logger : logging.Logger
-    exit_sig : threading.Event
-    gpio_queue : queue.PriorityQueue
-    """
-    # TODO: Pass logger config dict here for init?
-    def __init__(self, data_queue, logger, exit_sig, gpio_queue=None):
-        super().__init__(name=self.__class__.__name__)
-        self._data_queue = data_queue
-        self._exiting = exit_sig
-        self._logger = logger
-        self._internal_copy = []
-        self._gpio_queue = gpio_queue or queue.PriorityQueue()
-        # TODO: Find data rate to better control blinking
-        self._blink_data = Blink(11)
-
-    def run(self):
-        while not self._exiting.is_set() or not self._data_queue.empty():
-            try:
-                data = self._data_queue.get(block=True, timeout=0.1)
-                self._internal_copy.append(data)
-                self._logger.log(DATA_LVL, data)
-                self._gpio_queue.put_nowait(self._blink_data)
-            except queue.Empty:
-                # Using timeout and empty exception allows for thread to
-                # check exit signal
-                continue
-            except queue.Full:
-                continue
-            except FileNotFoundError:
-                _applog.error("Log handler file path not found, data will not "
-                              "be saved.")
-            else:
-                try:
-                    self._data_queue.task_done()
-                except AttributeError:
-                    # In case of multiprocessing.Queue
-                    pass
-
-        _applog.debug("Exiting DataWriter thread.")
+        applog.debug("Exiting %s thread.", self.__class__.__name__)
 
 
 class MountListener(threading.Thread):
@@ -212,35 +162,34 @@ class MountListener(threading.Thread):
     perform actions when a device is mounted."""
     def __init__(self, mount_path, log_dir, exit_sig):
         super().__init__(name=self.__class__.__name__)
+
         self._exiting = exit_sig
         self._mount = mount_path
         self._logs = log_dir
 
     def run(self):
+        if sys.platform == 'win32':
+            applog.warning("%s not supported on Windows Platform",
+                           self.__class__.__name__)
+            return
         while not self._exiting.is_set():
             # Check for device mount at mount path, sleep for POLL_RATE if none
-            if not os.path.ismount(self._mount):
-                time.sleep(POLL_RATE)
-                continue
-
-            try:
-                dispatcher = USBDispatcher(self._mount, self._logs)
-            except:
-                _applog.exception("Exception encountered instantiating "
-                                  "USBDispatcher")
-                continue
-            else:
-                _applog.info("Starting USB dispatcher.")
+            if os.path.ismount(self._mount):
+                applog.debug("Mount detected on %s", self._mount)
+                dispatcher = RemovableStorageHandler(self._mount, self._logs)
+                applog.info("Starting USB dispatcher.")
                 dispatcher.start()
                 dispatcher.join()
+            else:
+                time.sleep(POLL_RATE)
 
 
-class AT1Listener:
+class SerialListener:
     """"
-    Redesign of SerialLogger to achieve greater separation of duties,
+    Redesign of SerialLogger to achieve greater separation of responsibilities,
     and simplify the overall logic of the serial logging application.
 
-    AT1Listener comprises the core functionality of ATGMLogger - which is
+    SerialListener comprises the core functionality of ATGMLogger - which is
     capturing raw serial data from a serial device.
     Ingested serial data is pushed onto a Queue for consumption by another
     thread or subprocess. This is to ensure that ideally no serial data is
@@ -251,7 +200,7 @@ class AT1Listener:
     ----------
     handle : serial.Serial
     exit_sig : threading.Event
-    data_queue : queue.Queue or multiprocessing.Queue
+    data_queue : queue.Queue
 
     """
 
@@ -267,7 +216,7 @@ class AT1Listener:
             self._handle.open()
 
     @property
-    def output(self) -> queue.Queue:
+    def data(self) -> queue.Queue:
         return self._data_queue
 
     @property
@@ -278,6 +227,17 @@ class AT1Listener:
     def exiting(self) -> threading.Event:
         return self._exiting
 
+    def _sync_time(self, data):
+        applog.info("Attempting to synchronize to GPS time.")
+        ts = timestamp_from_data(data)
+        if ts is None:
+            applog.info("Unable to synchronize time, no valid GPS time data.")
+            return False
+        else:
+            cmd = Command(set_system_time, ts, priority=1)
+            self._cmd_queue.put_nowait(cmd)
+            return True
+
     def listen(self):
         """
         Listen endlessly for serial data on the specified port and add it
@@ -287,6 +247,7 @@ class AT1Listener:
         all data is read from the serial buffer as soon as it is available.
         To this end any IO operations are pushed to a Queue for offloading to a
         separate thread to be processed.
+
         """
         tick = 99
         while not self.exiting.is_set():
@@ -297,59 +258,106 @@ class AT1Listener:
             tick += 1
             # TODO: Consider periodically re-synchronizing (every 12hrs?)
             if not self._timesynced and (tick % 100 == 0):
-                _applog.info("Attempting to synchronize to GPS time.")
-                ts = timestamp_from_data(data)
-                if ts is None:
-                    _applog.info("Unable to synchronize time, no valid GPS "
-                                 "time data.")
-                    continue
-                else:
-                    cmd = Command(set_system_time, ts, priority=1)
-                    self._cmd_queue.put_nowait(cmd)
-                    self._timesynced = True
+                self._timesynced = self._sync_time(data)
+            elif tick % 10000 == 0:
+                applog.debug("Attempting to resynchronize time after 10000 "
+                             "ticks.")
+                self._sync_time(data)
 
-        # exiting set
-        _applog.debug("Exiting listener.listen() method, and closing serial "
-                      "handle.")
+        applog.debug("Exiting listener.listen() method, and closing serial "
+                     "handle.")
         self._handle.close()
 
 
 def parse_argv(argv):
+    parser = argparse.ArgumentParser(prog=__name__, description=__description__)
+    parser.add_argument('-V', '--version', action='version',
+                        version=__version__)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-d', '--device', action='store')
+    parser.add_argument('-l', '--logdir', action='store',
+                        default='/var/log/dgs')
+    parser.add_argument('-m', '--mountdir', action='store',
+                        help="Specify custom USB Storage mount path. "
+                             "Overrides path configured in configuration.")
+    parser.add_argument('-c', '--config', action='store', default='config.json',
+                        help="Specify path to custom JSON configuration.")
+    parser.add_argument('--nogpio', action='store_true',
+                        help="Disable GPIO output (LED notifications).")
+    return parser.parse_args(argv[1:])
+
+
+def get_config(argv):
+    """Parse arguments from commandline and load configuration file."""
     parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
     parser.add_argument('-V', '--version', action='version',
                         version=__version__)
     parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-d', '--device', action='store')
     parser.add_argument('-l', '--logdir', action='store',
                         default='/var/log/dgs')
-    parser.add_argument('-d', '--device', action='store')
+    parser.add_argument('-m', '--mountdir', action='store',
+                        help="Specify custom USB Storage mount path. "
+                             "Overrides path configured in configuration.")
     parser.add_argument('-c', '--config', action='store',
-                        default='config.json')
-    parser.add_argument('--nogpio', action='store_true', help="Disable GPIO "
-                                                              "thread.")
-    return parser.parse_args(argv[1:])
+                        help="Specify path to custom JSON configuration.")
+    parser.add_argument('--nogpio', action='store_true',
+                        help="Disable GPIO output (LED notifications).")
+
+    args = parser.parse_args(argv[1:])
+    config = get_json_config(args.config or CONFIG_PATH)
+
+    if args.device:
+        config['serial']['port'] = args.device
+
+    if args.logdir:
+        config['logging']['logdir'] = args.logdir
+
+    if args.mountdir:
+        config['usb']['mount'] = args.mountdir
+
+    if args.nogpio:
+        pass
+
+    return config
 
 
-def main(argv):
-    tstart = time.perf_counter()
+def run(*argv):
+    """
+    Initialize and start main application loop.
+
+
+    Parameters
+    ----------
+    argv
+
+    Returns
+    -------
+
+    """
+    if argv is None:
+        argv = sys.argv
+    t_start = time.perf_counter()
     args = parse_argv(argv)
-    _applog.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+    applog.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
 
     # TODO: Arguments passed via cmdline should take precedent over defaults
     # AND over JSON config values.
 
+    # Note: Behavior of get_json_config is to return empty dict if no json cfg
     config = get_json_config(args.config)
 
     c_serial = config.get('serial', dict(port='/dev/serial0', baudrate=57600,
                                          timeout=1))
     if args.device is not None:
-        c_serial.update(port=args.device)
+        c_serial.update(dict(port=args.device))
 
     c_usb = config.get('usb', dict(mount="/media/removable", copy_level="data"))
     c_gpio = config.get('gpio', dict(mode="board", data_led=11, usb_led=13))
     c_logging = config.get('logging',
                            dict(logdir="/var/log/{}".format(__name__)))
     if args.logdir is not None:
-        c_logging.update(logdir=args.logdir)
+        c_logging.update({"logdir": args.logdir})
 
     # Initialize and Run #
     exit_event = threading.Event()
@@ -370,19 +378,19 @@ def main(argv):
     data_log.addHandler(data_hdlr)
     data_log.setLevel(DATA_LVL)
 
-    hdlr = serial.Serial(**c_serial)
-    listener = AT1Listener(hdlr,
-                           exit_sig=exit_event,
-                           data_queue=data_queue,
-                           cmd_queue=cmd_queue)
+    hdl = serial.Serial(**c_serial)
+    listener = SerialListener(hdl,
+                              exit_sig=exit_event,
+                              data_queue=data_queue,
+                              cmd_queue=cmd_queue)
 
     threads = []
-    if not args.nogpio:
+    if not args.nogpio and HAVE_GPIO:
         threads.append(GPIOListener(c_gpio,
                                     gpio_queue=gpio_queue,
                                     exit_sig=exit_event))
 
-    threads.append(DataWriter(data_queue,
+    threads.append(DataLogger(data_queue,
                               logger=data_log,
                               exit_sig=exit_event,
                               gpio_queue=gpio_queue))
@@ -390,25 +398,24 @@ def main(argv):
     threads.append(CommandListener(cmd_queue,
                                    exit_sig=exit_event))
 
-    threads.append(MountListener(c_usb['mount'],
+    threads.append(MountListener(c_usb.get('mount', args.mountdir),
                                  log_dir=log_dir,
                                  exit_sig=exit_event))
 
     for thread in threads:
         thread.start()
 
-    tend = time.perf_counter()
-    _applog.debug("Initialization time: " + str(tend - tstart))
+    applog.debug("Initialization time: %.5f", time.perf_counter() - t_start)
     try:
         # Infinite Main Thread - Listen for Serial Data
-        _applog.debug("Starting listener.")
+        applog.debug("Starting listener.")
         listener.listen()
     except KeyboardInterrupt:
-        _applog.debug("KeyboardInterrupt intercepted. Setting exit signal.")
+        applog.debug("KeyboardInterrupt intercepted. Setting exit signal.")
         exit_event.set()
         for thread in threads:
-            _applog.debug("Joining thread {}, timeout {}"
-                          .format(thread.name, JOIN_TIMEOUT))
+            applog.debug("Joining thread {}, timeout {}"
+                         .format(thread.name, JOIN_TIMEOUT))
             thread.join(timeout=JOIN_TIMEOUT)
         return 1
     return 0

@@ -15,9 +15,14 @@ from serial.tools.list_ports import comports
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
+_log.addHandler(logging.StreamHandler(sys.stderr))
 
 ENCODING = 'latin-1'
 AT1Baud = 57600
+SEND_COUNT = 0
+
+"""Utility to send sample data over a serial connection for testing of the 
+atgmlogger functionality."""
 
 
 def get_at1_handle(device=None, read_timeout=1):
@@ -61,9 +66,9 @@ def send(handle, data: List, interval=1.0, count=None,
     repeat : bool, Optional
         If True, input data will be sent and cycled endlessly
     copy_output : Callable, Optional
-        Not yet implemented.
         When sending data via handle, send additional identical copy to
         copy_output.
+        Callable should accept single argument of encoded byte-array.
 
     Returns
     -------
@@ -76,24 +81,30 @@ def send(handle, data: List, interval=1.0, count=None,
         # Convert list to generator (allows use of next())
         data = (line for line in data)
 
-    send_count = 0
+    global SEND_COUNT
     while True:
-        if count is not None and count >= send_count:
+        if count is not None and count >= SEND_COUNT:
             _log.info("Send Count reached, exiting main loop.")
             break
 
         try:
             line = next(data)  # type: str
         except StopIteration:
-            _log.info("Data source exhausted, {} lines sent.".format(send_count))
+            _log.info("Data source exhausted, {} lines sent.".format(SEND_COUNT))
             break
         enc_line = line.encode(ENCODING)
         handle.write(enc_line)
-        send_count += 1
+        if copy_output is not None:
+            try:
+                copy_output(enc_line)
+            except AttributeError:
+                pass
+        SEND_COUNT += 1
+        if SEND_COUNT % 100 == 0:
+            _log.debug("Sent line %d", SEND_COUNT)
         time.sleep(interval)
 
-    _log.info("Exiting send loop. # Lines Sent: {}".format(send_count))
-    return send_count
+    return SEND_COUNT
 
 
 if __name__ == '__main__':
@@ -122,5 +133,18 @@ if __name__ == '__main__':
         _log.error("Input file contains no data.")
         sys.exit(1)
 
-    res = send(hdl, data=contents, interval=opts.interval, count=opts.count)
-    print("send completed, result: ", res)
+    _log.info("Starting send with params:\n"
+              "Device: %s\tRepeat: %s\tInterval: %.2f\n",
+              opts.device, str(opts.repeat), opts.interval)
+    print("Sending:")
+    try:
+        res = send(hdl, data=contents, interval=opts.interval,
+                   count=opts.count, repeat=opts.repeat)
+    except KeyboardInterrupt:
+        _log.info("Keyboard Interrupt Intercepted\n"
+                  "# Lines Sent: %d", SEND_COUNT)
+        sys.exit(1)
+    else:
+        _log.info("Send completed.\n"
+                  "# Lines Sent: %d", SEND_COUNT)
+        sys.exit(0)

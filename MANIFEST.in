@@ -1,0 +1,4 @@
+include system/*.*
+include README.md
+include tools/send.py
+include atgmlogger/*.json
