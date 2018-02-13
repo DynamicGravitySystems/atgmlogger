@@ -1,31 +1,25 @@
 from setuptools import setup
-from setuptools.command.install import install
+from atgmlogger import __version__, __description__
 
 requirements = [
     'pyserial >= 3.3',
     # 'RPi.GPIO >= 0.6.3'
 ]
 
-
-class PostInstall(install):
-    def run(self):
-        print("Executing post installation tasks")
-
-
 setup(
-    name='dgs-serial-logger',
-    version='0.3.0',
+    name='atgmlogger',
+    version=__version__,
     packages=['atgmlogger'],
     # py_modules=['atgmlogger'],
     url='https://github.com/bradyzp/dgs-serial-logger',
     license='',
     author='Zachery Brady',
     author_email='bradyzp@dynamicgravitysystems.com',
-    description='Serial Logging Utility for DGS Advanced Technology Gravity '
-                'Meters.',
+    description=__description__,
     install_requires=requirements,
+    python_requires='>=3.5.*',
     include_package_data=True,
-    # scripts=['atgmlogger/atgmlogger.py']
+    zip_safe=True,
     entry_points={
         'console_scripts': [
             'atgmlogger = atgmlogger.atgmlogger:run'

@@ -10,15 +10,12 @@ SRCDIR = .
 INSTALL = /usr/bin/install -m644
 MKDIR = /usr/bin/install -d
 
-# Installation Path for Scripts
-BUILD_PATH = $(DESTDIR)$(PREFIX)/SerialLogger
 # Installation Path for Systemd unit files
 UNIT_PATH = $(DESTDIR)$(SYSTEMD)
 # Installation Path for UDEV rules
 UDEV_PATH = $(DESTDIR)$(UDEV)
 
 ### Define files to be installed ###
-BUILD_FILES = $(BUILD_PATH)/SerialLogger.py $(BUILD_PATH)/logging.yaml $(BUILD_PATH)/config.yaml
 SYSTEMD_FILES = $(UNIT_PATH)/SerialLogger.service $(UNIT_PATH)/media-removable.mount
 UDEV_FILES = $(UDEV_PATH)/90-removable-storage.rules
 
@@ -27,39 +24,23 @@ UDEV_FILES = $(UDEV_PATH)/90-removable-storage.rules
 .PHONY: all
 all: ;
 
-$(BUILD_PATH)/SerialLogger.py: $(SRCDIR)/SerialLogger.py
-$(BUILD_PATH)/logging.yaml: $(SRCDIR)/logging.yaml
-$(BUILD_PATH)/config.yaml: $(SRCDIR)/config.yaml
-$(UNIT_PATH)/SerialLogger.service: $(SRCDIR)/system/SerialLogger.service
+$(UNIT_PATH)/atgmlogger.service: $(SRCDIR)/atgmlogger.service
 $(UNIT_PATH)/media-removable.mount: $(SRCDIR)/system/media-removable.mount
 $(UDEV_PATH)/90-removable-storage.rules: $(SRCDIR)/system/90-removable-storage.rules
 
-system/SerialLogger.service:
-	sed 's=@BINDIR@=$(abspath $(BUILD_PATH))=;s=@PYTHON@=$(PYTHON)=' $(SRCDIR)/system/SerialLogger.in > $(SRCDIR)/system/SerialLogger.service
-
 .PHONY: install
-install: $(BUILD_FILES) $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
+install: $(SYSTEMD_FILES) $(UDEV_FILES) $(USB)
 	@if [ -z "$(DESTDIR)" ]; then \
 		if ! grep -q ^enable_uart=1 '/boot/config.txt'; then \
 			echo "enable_uart=1" >> '/boot/config.txt'; \
 			echo "UART enabled, REBOOT Required." ;\
 		fi; \
 		sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt; \
-		systemctl stop SerialLogger.service; \
-		$(PIP) install -r requirements.txt; \
 		systemctl daemon-reload; \
 		systemctl disable media-removable.mount; \
 		systemctl enable media-removable.mount; \
-		systemctl disable SerialLogger.service; \
-		systemctl enable SerialLogger.service; \
-		echo "Start SerialLogger with sudo systemctl start SerialLogger.service"; \
+		echo "Start SerialLogger with sudo systemctl start atgmlogger.service"; \
 	fi; \
-
-$(BUILD_PATH):
-	$(MKDIR) $(BUILD_PATH)
-
-$(BUILD_PATH)/%: | $(BUILD_PATH)
-	$(INSTALL) $< $@
 
 $(UNIT_PATH):
 	$(MKDIR) $(UNIT_PATH)

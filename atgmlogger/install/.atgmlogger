@@ -1,0 +1,74 @@
+{
+  "version": 0.4,
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 57600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "timeout": 1
+  },
+  "logging": {
+    "version": 1,
+    "logdir": "/var/log/atgmlogger",
+    "disable_existing_loggers": true,
+    "formatters": {
+      "data_fmtr": {
+        "format": "%{message)s"
+      },
+      "applog_fmtr": {
+        "format": "%(levelname)s::%(asctime)s (%(funcName)s) - %(message)s",
+        "datefmt": "%Y-%m-%d - %H:%M:%S"
+      }
+    },
+    "filters": {
+      "data_filter": {
+        "()": "common.level_filter",
+        "level": 60
+      }
+    },
+    "handlers": {
+      "data_hdlr": {
+        "class": "logging.handlers.TimedRotatingFileHandler",
+        "formatter": "data_fmtr",
+        "filename": "gravdata.dat",
+        "when": "W6",
+        "backupCount": 7,
+        "encoding": "utf-8",
+        "level": 60
+      },
+      "debug_hdlr": {
+        "class": "logging.StreamHandler",
+        "formatter": "applog_fmtr",
+        "stream": "ext://sys.stderr",
+        "level": "DEBUG",
+        "filters": ["data_filter"]
+      },
+      "applog_hdlr": {
+        "class": "logging.handlers.TimedRotatingFileHandler",
+        "formatter": "applog_fmtr",
+        "filename": "application.log",
+        "when": "MIDNIGHT",
+        "interval": 7,
+        "backupcount": 52,
+        "encoding": "utf-8",
+        "level": "INFO",
+        "filters": ["data_filter"]
+      }
+    },
+    "root": {
+      "level": "DEBUG",
+      "handlers": ["data_hdlr", "debug_hdlr", "applog_hdlr"],
+      "propogate": true
+    }
+  },
+  "usb": {
+    "mount": "/media/removable",
+    "copy_level": "debug"
+  },
+  "gpio": {
+    "mode": "board",
+    "data_led": 11,
+    "usb_led": 13
+  }
+}

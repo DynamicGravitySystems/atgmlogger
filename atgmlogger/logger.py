@@ -3,7 +3,7 @@
 import queue
 import threading
 from .common import Blink
-from atgmlogger import applog
+from atgmlogger import APPLOG
 __all__ = ['DataLogger']
 
 DATA_LVL = 75
@@ -44,7 +44,7 @@ class DataLogger(threading.Thread):
             except queue.Full:
                 continue
             except FileNotFoundError:
-                applog.error("Log handler file path not found, data will not "
+                APPLOG.error("Log handler file path not found, data will not "
                               "be saved.")
             try:
                 self._data_queue.task_done()
@@ -52,4 +52,4 @@ class DataLogger(threading.Thread):
                 # In case of multiprocessing.Queue
                 pass
 
-        applog.debug("Exiting DataLogger thread.")
+        APPLOG.debug("Exiting DataLogger thread.")

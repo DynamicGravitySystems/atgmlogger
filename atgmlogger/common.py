@@ -1,24 +1,96 @@
 # coding: utf-8
 
+import os
 import sys
 import json
 import shlex
+import argparse
 import datetime
 import itertools
 import subprocess
-from typing import Union
+from typing import Union, Dict
 from pathlib import Path
 
-from atgmlogger import applog
+from atgmlogger import APPLOG, __description__, __version__
 
-__all__ = ['get_json_config', 'decode', 'convert_gps_time',
+__all__ = ['parse_args', 'get_config', 'decode', 'convert_gps_time',
            'timestamp_from_data', 'set_system_time', 'Blink']
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
-JSON_CONFIG = Path('config.json')
+CFG_NAME = '.atgmlogger'
+CFG_PATHS = [Path('~').expanduser().joinpath(CFG_NAME),
+             Path('/etc/atgmlogger').joinpath(CFG_NAME)]
 
 
-def get_json_config(path=None):
+def level_filter(level):
+    """Return a filter function to be used by a logging handler.
+    This function is referenced in the default logging config file."""
+    def _filter(record):
+        """Filter a record based on level, allowing only records less than
+        the specified level."""
+        if record.levelno < level:
+            return True
+        return False
+    return _filter
+
+
+def preprocess_log_config(logconf: Dict, logdir=None):
+    logdir = Path(logdir or logconf['logdir'])
+
+    for handler, config in logconf['handlers'].items():  # type: str, Dict
+        if 'filename' in config:
+            fname = config['filename']
+            full_path = str(logdir.joinpath(fname).resolve())
+        else:
+            continue
+        config['filename'] = full_path
+
+    return logconf
+
+
+def parse_args(argv):
+    """Parse arguments from commandline and load configuration file."""
+    parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
+    parser.add_argument('-V', '--version', action='version',
+                        version=__version__)
+    parser.add_argument('-v', '--verbose', action='count')
+    parser.add_argument('-d', '--device', action='store')
+    parser.add_argument('-l', '--logdir', action='store')
+    parser.add_argument('-m', '--mountdir', action='store',
+                        help="Specify custom USB Storage mount path. "
+                             "Overrides path configured in configuration.")
+    parser.add_argument('-c', '--config', action='store',
+                        help="Specify path to custom JSON configuration.")
+    parser.add_argument('--nogpio', action='store_true',
+                        help="Disable GPIO output (LED notifications).")
+    parser.add_argument('--uninstall', action='store_true',
+                        help="Uninstall module configurations and systemd "
+                             "unit scripts.")
+
+    args = parser.parse_args(argv[1:])
+    if args.uninstall:
+        # TODO: Implement this
+        pass
+
+    config = get_config(args.config)
+    if config is None:
+        return dict()
+
+
+    if args.device:
+        config['serial']['port'] = args.device
+
+    if args.mountdir:
+        config['usb']['mount'] = args.mountdir
+
+    if args.nogpio:
+        pass
+
+    config['logging'] = preprocess_log_config(config['logging'], args.logdir)
+    return config
+
+
+def get_config(path=None):
     """
     Load a configuration dictionary from JSON formatted file at 'path'.
     If configuration file is not specified, the application default is tried
@@ -40,13 +112,22 @@ def get_json_config(path=None):
         Configuration dictionary
 
     """
-    empty_config = dict(logging={},
-                        usb={},
-                        gpio={})
-    path = Path(path) or JSON_CONFIG
-    if not path.exists():
-        applog.warning("Configuration files does not exist.")
+    if path is None:
+        # Find the first config in the search path (CFG_PATHS) that exists
+        for c_path in CFG_PATHS:
+            if c_path.exists():
+                path = c_path
+                break
+        else:
+            APPLOG.warning("No configuration file could be found in search "
+                           "path.")
+            return dict()
+    elif not os.path.exists(path):
+        APPLOG.warning("Provided path: %s does not exist." % str(path))
         return dict()
+    else:
+        path = Path(path)
+
     try:
         with path.open('r') as fd:
             config = json.load(fd)

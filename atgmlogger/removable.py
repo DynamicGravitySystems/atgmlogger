@@ -17,7 +17,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from atgmlogger import applog
+from atgmlogger import APPLOG
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -60,13 +60,13 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
 
 def umount(path):
     if sys.platform == 'win32':
-        applog.warning("umount not supported on Windows Platform")
+        APPLOG.warning("umount not supported on Windows Platform")
         return -1
     try:
         result = subprocess.check_output(['/bin/umount', str(path)])
     except OSError:
         result = 1
-        applog.exception("Error occurred attempting to un-mount device: {}"
+        APPLOG.exception("Error occurred attempting to un-mount device: {}"
                          .format(path))
     return result
 
@@ -121,7 +121,7 @@ class RemovableStorageHandler(threading.Thread):
 
     def run(self):
         if not os.path.ismount(self.devpath):
-            applog.error("{path} is not mounted or is not a valid mount point."
+            APPLOG.error("{path} is not mounted or is not a valid mount point."
                          .format(path=self.devpath))
             return 1
 
@@ -141,7 +141,7 @@ class RemovableStorageHandler(threading.Thread):
     @_runhook(priority=1)
     def copy_logs(self):
         print("Copy Logs Called")
-        applog.debug("Processing copy_logs")
+        APPLOG.debug("Processing copy_logs")
         file_list = []  # type: List[Path]
         copy_size = 0   # Accumulated size of logs in bytes
 
@@ -151,7 +151,7 @@ class RemovableStorageHandler(threading.Thread):
         for file in file_list:
             copy_size += file.stat().st_size
 
-        applog.info("Total log size to be copied: {} KiB".format(
+        APPLOG.info("Total log size to be copied: {} KiB".format(
             copy_size/1024))
 
         def get_free(path):
@@ -162,7 +162,7 @@ class RemovableStorageHandler(threading.Thread):
             return statvfs.f_bsize * statvfs.f_bavail
 
         if copy_size > get_free(self.devpath):
-            applog.warning("Total size of datafiles to be copied is greater "
+            APPLOG.warning("Total size of datafiles to be copied is greater "
                          "than free-space on device.")
 
         dest_dir = self.devpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
@@ -175,9 +175,9 @@ class RemovableStorageHandler(threading.Thread):
 
             try:
                 shutil.copy(src_path, dest_path)
-                applog.info("Copied file %s to %s", fname, dest_path)
+                APPLOG.info("Copied file %s to %s", fname, dest_path)
             except OSError:
-                applog.exception("Exception encountered copying log file.")
+                APPLOG.exception("Exception encountered copying log file.")
                 continue
 
         self._current_path = dest_dir
@@ -185,7 +185,7 @@ class RemovableStorageHandler(threading.Thread):
 
     @_runhook(priority=2)
     def watch_files(self):
-        applog.debug("Processing watch_files")
+        APPLOG.debug("Processing watch_files")
         root_files = [file.name for file in self.devpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)

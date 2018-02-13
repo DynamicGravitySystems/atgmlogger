@@ -10,3 +10,6 @@ def main(*args):
         args = sys.argv
 
     return run(*args)
+
+
+main(*sys.argv)

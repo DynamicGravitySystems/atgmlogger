@@ -14,7 +14,6 @@ import sys
 import time
 import queue
 import logging
-import argparse
 import threading
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -29,11 +28,11 @@ except (ImportError, RuntimeError):
 from .common import *
 from .removable import RemovableStorageHandler
 from .logger import DataLogger
-from atgmlogger import __version__, __description__, VERBOSITY_MAP, applog
+from atgmlogger import VERBOSITY_MAP, APPLOG
 
 JOIN_TIMEOUT = 0.1
 POLL_RATE = 1
-CONFIG_PATH = 'config.json'
+CONFIG_PATH = '.atgmlogger'
 DATA_LVL = 75
 
 
@@ -41,7 +40,7 @@ class GPIOListener(threading.Thread):
     def __init__(self, config, gpio_queue: queue.PriorityQueue, exit_sig):
         super().__init__(name=self.__class__.__name__, daemon=True)
         if not HAVE_GPIO:
-            applog.warning("GPIO Module Unavailable on this System.")
+            APPLOG.warning("GPIO Module Unavailable on this System.")
             return
         self._queue = gpio_queue
         self._exiting = exit_sig
@@ -68,7 +67,7 @@ class GPIOListener(threading.Thread):
 
     def run(self):
         if not HAVE_GPIO:
-            applog.warning("GPIO Module is unavailable. Exiting %s thread.",
+            APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
                            self.__class__.__name__)
             return
 
@@ -82,7 +81,7 @@ class GPIOListener(threading.Thread):
 
         for pin in self.outputs:
             gpio.output(pin, False)
-        applog.debug("Exiting GPIOListener thread.")
+        APPLOG.debug("Exiting GPIOListener thread.")
         gpio.cleanup()
 
 
@@ -103,22 +102,21 @@ class Command:
     methods to be captured if necessary.
 
     """
-    def __init__(self, command, *cmd_args, priority=None, name=None,
+    def __init__(self, command, *cmd_args, priority=None, name=None, log=True,
                  **cmd_kwargs):
         self.priority = priority or 9
         self.functor = command
         self.name = name or command.__name__
+        self._log = True
         self._args = cmd_args
         self._kwargs = cmd_kwargs
 
     def execute(self):
-        return self.functor(*self._args, **self._kwargs)
-
-    def __call__(self, *args, **kwargs):
-        """Alternate syntax to execute()
-        TODO: Allow updating of kwargs via call syntax?
-        """
-        return self.functor(*self._args, **self._kwargs)
+        res = self.functor(*self._args, **self._kwargs)
+        if self._log:
+            APPLOG.info("Command {name} executed with result: {"
+                        "result}".format(name=self.name, result=res))
+        return res
 
     def __getitem__(self, item):
         if item == 0:
@@ -151,10 +149,10 @@ class CommandListener(threading.Thread):
                 continue
             result = cmd.execute()
             self._results.append(result)
-            applog.debug("Command executed without exception.")
+            APPLOG.debug("Command executed without exception.")
             self._cmd_queue.task_done()
 
-        applog.debug("Exiting %s thread.", self.__class__.__name__)
+        APPLOG.debug("Exiting %s thread.", self.__class__.__name__)
 
 
 class MountListener(threading.Thread):
@@ -169,15 +167,15 @@ class MountListener(threading.Thread):
 
     def run(self):
         if sys.platform == 'win32':
-            applog.warning("%s not supported on Windows Platform",
+            APPLOG.warning("%s not supported on Windows Platform",
                            self.__class__.__name__)
             return
         while not self._exiting.is_set():
             # Check for device mount at mount path, sleep for POLL_RATE if none
             if os.path.ismount(self._mount):
-                applog.debug("Mount detected on %s", self._mount)
+                APPLOG.debug("Mount detected on %s", self._mount)
                 dispatcher = RemovableStorageHandler(self._mount, self._logs)
-                applog.info("Starting USB dispatcher.")
+                APPLOG.info("Starting USB dispatcher.")
                 dispatcher.start()
                 dispatcher.join()
             else:
@@ -228,10 +226,10 @@ class SerialListener:
         return self._exiting
 
     def _sync_time(self, data):
-        applog.info("Attempting to synchronize to GPS time.")
+        APPLOG.info("Attempting to synchronize to GPS time.")
         ts = timestamp_from_data(data)
         if ts is None:
-            applog.info("Unable to synchronize time, no valid GPS time data.")
+            APPLOG.info("Unable to synchronize time, no valid GPS time data.")
             return False
         else:
             cmd = Command(set_system_time, ts, priority=1)
@@ -260,66 +258,13 @@ class SerialListener:
             if not self._timesynced and (tick % 100 == 0):
                 self._timesynced = self._sync_time(data)
             elif tick % 10000 == 0:
-                applog.debug("Attempting to resynchronize time after 10000 "
+                APPLOG.debug("Attempting to resynchronize time after 10000 "
                              "ticks.")
                 self._sync_time(data)
 
-        applog.debug("Exiting listener.listen() method, and closing serial "
+        APPLOG.debug("Exiting listener.listen() method, and closing serial "
                      "handle.")
         self._handle.close()
-
-
-def parse_argv(argv):
-    parser = argparse.ArgumentParser(prog=__name__, description=__description__)
-    parser.add_argument('-V', '--version', action='version',
-                        version=__version__)
-    parser.add_argument('-v', '--verbose', action='count')
-    parser.add_argument('-d', '--device', action='store')
-    parser.add_argument('-l', '--logdir', action='store',
-                        default='/var/log/dgs')
-    parser.add_argument('-m', '--mountdir', action='store',
-                        help="Specify custom USB Storage mount path. "
-                             "Overrides path configured in configuration.")
-    parser.add_argument('-c', '--config', action='store', default='config.json',
-                        help="Specify path to custom JSON configuration.")
-    parser.add_argument('--nogpio', action='store_true',
-                        help="Disable GPIO output (LED notifications).")
-    return parser.parse_args(argv[1:])
-
-
-def get_config(argv):
-    """Parse arguments from commandline and load configuration file."""
-    parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
-    parser.add_argument('-V', '--version', action='version',
-                        version=__version__)
-    parser.add_argument('-v', '--verbose', action='count')
-    parser.add_argument('-d', '--device', action='store')
-    parser.add_argument('-l', '--logdir', action='store',
-                        default='/var/log/dgs')
-    parser.add_argument('-m', '--mountdir', action='store',
-                        help="Specify custom USB Storage mount path. "
-                             "Overrides path configured in configuration.")
-    parser.add_argument('-c', '--config', action='store',
-                        help="Specify path to custom JSON configuration.")
-    parser.add_argument('--nogpio', action='store_true',
-                        help="Disable GPIO output (LED notifications).")
-
-    args = parser.parse_args(argv[1:])
-    config = get_json_config(args.config or CONFIG_PATH)
-
-    if args.device:
-        config['serial']['port'] = args.device
-
-    if args.logdir:
-        config['logging']['logdir'] = args.logdir
-
-    if args.mountdir:
-        config['usb']['mount'] = args.mountdir
-
-    if args.nogpio:
-        pass
-
-    return config
 
 
 def run(*argv):
@@ -338,14 +283,24 @@ def run(*argv):
     if argv is None:
         argv = sys.argv
     t_start = time.perf_counter()
-    args = parse_argv(argv)
-    applog.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+    args = parse_args(argv)
+    APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+
+    # Attempt to run first-run installation script
+    if not os.path.exists("/etc/%s/.atgmlogger" % __name__):
+        APPLOG.info("Configuring ATGMLogger for first run.")
+        try:
+            from . import install
+            install.run()
+
+        except (ImportError, RuntimeError):
+            APPLOG.error("Failed to import/execute first run initialization "
+                         "script")
 
     # TODO: Arguments passed via cmdline should take precedent over defaults
     # AND over JSON config values.
-
     # Note: Behavior of get_json_config is to return empty dict if no json cfg
-    config = get_json_config(args.config)
+    config = get_config(args.config)
 
     c_serial = config.get('serial', dict(port='/dev/serial0', baudrate=57600,
                                          timeout=1))
@@ -405,16 +360,16 @@ def run(*argv):
     for thread in threads:
         thread.start()
 
-    applog.debug("Initialization time: %.5f", time.perf_counter() - t_start)
+    APPLOG.debug("Initialization time: %.5f", time.perf_counter() - t_start)
     try:
         # Infinite Main Thread - Listen for Serial Data
-        applog.debug("Starting listener.")
+        APPLOG.debug("Starting serial listener.")
         listener.listen()
     except KeyboardInterrupt:
-        applog.debug("KeyboardInterrupt intercepted. Setting exit signal.")
+        APPLOG.debug("KeyboardInterrupt intercepted. Setting exit signal.")
         exit_event.set()
         for thread in threads:
-            applog.debug("Joining thread {}, timeout {}"
+            APPLOG.debug("Joining thread {}, timeout {}"
                          .format(thread.name, JOIN_TIMEOUT))
             thread.join(timeout=JOIN_TIMEOUT)
         return 1
