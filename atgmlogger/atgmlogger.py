@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# -*- encoding: utf-8 -*-
+# -*- coding: utf-8 -*-
 
 """
 Advanced Technology Gravity Meter - Logger (AGTMlogger)
@@ -28,7 +28,7 @@ except (ImportError, RuntimeError):
 from .common import *
 from .removable import RemovableStorageHandler
 from .logger import DataLogger
-from atgmlogger import VERBOSITY_MAP, APPLOG
+from atgmlogger import VERBOSITY_MAP, APPLOG, rcParams
 
 JOIN_TIMEOUT = 0.1
 POLL_RATE = 1
@@ -297,11 +297,7 @@ def run(*argv):
             APPLOG.error("Failed to import/execute first run initialization "
                          "script")
 
-    # TODO: Arguments passed via cmdline should take precedent over defaults
-    # AND over JSON config values.
-    # Note: Behavior of get_json_config is to return empty dict if no json cfg
-    config = get_config(args.config)
-
+    c_serial = rcParams['serial']
     c_serial = config.get('serial', dict(port='/dev/serial0', baudrate=57600,
                                          timeout=1))
     if args.device is not None:

@@ -1,9 +1,9 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
 import os
 import sys
-import json
 import shlex
+import logging
 import argparse
 import datetime
 import itertools
@@ -11,15 +11,13 @@ import subprocess
 from typing import Union, Dict
 from pathlib import Path
 
-from atgmlogger import APPLOG, __description__, __version__
+from atgmlogger import APPLOG, __description__, __version__, VERBOSITY_MAP
+from atgmlogger import rcParams
 
-__all__ = ['parse_args', 'get_config', 'decode', 'convert_gps_time',
-           'timestamp_from_data', 'set_system_time', 'Blink']
+__all__ = ['parse_args', 'decode', 'convert_gps_time', 'timestamp_from_data',
+           'set_system_time', 'Blink']
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
-CFG_NAME = '.atgmlogger'
-CFG_PATHS = [Path('~').expanduser().joinpath(CFG_NAME),
-             Path('/etc/atgmlogger').joinpath(CFG_NAME)]
 
 
 def level_filter(level):
@@ -34,13 +32,18 @@ def level_filter(level):
     return _filter
 
 
+# TODO: Move to __init__
 def preprocess_log_config(logconf: Dict, logdir=None):
     logdir = Path(logdir or logconf['logdir'])
 
     for handler, config in logconf['handlers'].items():  # type: str, Dict
         if 'filename' in config:
             fname = config['filename']
-            full_path = str(logdir.joinpath(fname).resolve())
+            # Path.resolve() raises FileNotFoundError in Python 3.5 if not exist
+            if sys.version_info.minor < 6:
+                full_path = os.path.join(str(logdir), fname)
+            else:
+                full_path = str(logdir.joinpath(fname).resolve(strict=False))
         else:
             continue
         config['filename'] = full_path
@@ -53,8 +56,10 @@ def parse_args(argv):
     parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
     parser.add_argument('-V', '--version', action='version',
                         version=__version__)
-    parser.add_argument('-v', '--verbose', action='count')
-    parser.add_argument('-d', '--device', action='store')
+    parser.add_argument('-v', '--verbose', action='count',
+                        help="Enable verbose logging.")
+    parser.add_argument('-d', '--device', action='store',
+                        help="Serial device path")
     parser.add_argument('-l', '--logdir', action='store')
     parser.add_argument('-m', '--mountdir', action='store',
                         help="Specify custom USB Storage mount path. "
@@ -72,70 +77,18 @@ def parse_args(argv):
         # TODO: Implement this
         pass
 
-    config = get_config(args.config)
-    if config is None:
-        return dict()
+    log_level = VERBOSITY_MAP.get(args.verbose, logging.DEBUG)
+    APPLOG.setLevel(log_level)
 
-
+    # Set overrides from arguments
     if args.device:
-        config['serial']['port'] = args.device
-
+        rcParams['serial.port'] = args.device
+    if args.logdir:
+        rcParams['logging.logdir'] = args.logdir
     if args.mountdir:
-        config['usb']['mount'] = args.mountdir
+        rcParams['usb.mount'] = args.mountdir
 
-    if args.nogpio:
-        pass
-
-    config['logging'] = preprocess_log_config(config['logging'], args.logdir)
-    return config
-
-
-def get_config(path=None):
-    """
-    Load a configuration dictionary from JSON formatted file at 'path'.
-    If configuration file is not specified, the application default is tried
-    'JSON_CONFIG'.
-    If path does not exist, or JSON Decode fails (invalid JSON syntax),
-    an empty configuration dictionary is returned.
-        The empty configuration dictionary defines the common keys,
-        with empty dictionaries as their value.
-
-    Parameters
-    ----------
-    path : Path
-        Path to JSON configuration file. If not specified, module default is
-        used.
-
-    Returns
-    -------
-    dict
-        Configuration dictionary
-
-    """
-    if path is None:
-        # Find the first config in the search path (CFG_PATHS) that exists
-        for c_path in CFG_PATHS:
-            if c_path.exists():
-                path = c_path
-                break
-        else:
-            APPLOG.warning("No configuration file could be found in search "
-                           "path.")
-            return dict()
-    elif not os.path.exists(path):
-        APPLOG.warning("Provided path: %s does not exist." % str(path))
-        return dict()
-    else:
-        path = Path(path)
-
-    try:
-        with path.open('r') as fd:
-            config = json.load(fd)
-    except json.JSONDecodeError:
-        print("Error decoding JSON config, returning empty config.")
-        return dict()
-    else:
-        return config
+    return args
 
 
 def decode(bytearr, encoding='utf-8'):
