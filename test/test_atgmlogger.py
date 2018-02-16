@@ -18,7 +18,7 @@ _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 _log.addHandler(logging.StreamHandler(stream=sys.stderr))
 
-SLEEPTIME = os.getenv('SLEEPTIME', .5)
+SLEEPTIME = float(os.getenv('SLEEPTIME', .5))
 
 
 def join_threads(threads, timeout=0.1):
