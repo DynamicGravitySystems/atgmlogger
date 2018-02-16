@@ -293,21 +293,19 @@ def run(*argv):
         APPLOG.info("Configuring ATGMLogger for first run.")
         try:
             from . import install
-            install.run()
+            install.install(verbose=True)
 
         except (ImportError, RuntimeError):
-            APPLOG.error("Failed to import/execute first run initialization "
-                         "script")
+            APPLOG.exception("Failed to import/execute first run "
+                             "initialization script")
 
     log_dir = Path(rcParams['logging.logdir']) or Path('~').joinpath('atgmlogger')
+    APPLOG.debug("Logging path set to: %s", str(log_dir))
     try:
         log_dir.mkdir(parents=False, exist_ok=True)
     except FileNotFoundError:
         log_dir = Path('.')
     try:
-        if args.verbose >= 2:
-            print("Applying following dict to logging config:\n")
-            pprint(rcParams['logging'])
         logging.config.dictConfig(rcParams['logging'])
         data_log = logging.getLogger()
         APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))

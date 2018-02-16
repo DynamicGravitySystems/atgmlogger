@@ -38,14 +38,27 @@ def parse_args(argv):
                         help="Specify path to custom JSON configuration.")
     parser.add_argument('--nogpio', action='store_true',
                         help="Disable GPIO output (LED notifications).")
+    parser.add_argument('--install', action='store_true',
+                        help="Install/verify system components and systemd "
+                             "configuration.")
     parser.add_argument('--uninstall', action='store_true',
                         help="Uninstall module configurations and systemd "
                              "unit scripts.")
 
     args = parser.parse_args(argv[1:])
-    if args.uninstall:
-        # TODO: Implement this
-        pass
+    if args.install:
+        try:
+            from . import install
+            install.install()
+        except (ImportError, OSError):
+            APPLOG.exception("Exception occurred trying to install system "
+                             "files.")
+    elif args.uninstall:
+        try:
+            from . import install
+            install.uninstall()
+        except (ImportError, OSError):
+            APPLOG.exception("Exception occurred uninstalling system files.")
 
     log_level = VERBOSITY_MAP.get(args.verbose, logging.DEBUG)
     APPLOG.setLevel(log_level)

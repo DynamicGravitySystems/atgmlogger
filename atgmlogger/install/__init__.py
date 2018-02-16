@@ -2,14 +2,16 @@
 
 import os
 import sys
+import logging
 import subprocess
 import pkg_resources as pkg
 
-__all__ = ['run']
+__all__ = ['install', 'uninstall']
 
-VERBOSE = True
 BASEPKG = __name__.split('.')[0]
-
+_log = logging.getLogger(__name__)
+_log.addHandler(logging.StreamHandler(sys.stderr))
+_log.setLevel(logging.WARNING)
 _file_map = {
     '.atgmlogger': '/etc/%s/.atgmlogger' % BASEPKG,
     'logging.json': '/etc/%s/logging.json' % BASEPKG,
@@ -26,17 +28,21 @@ def write_bytes(path, bytearr, mode=0o644):
     os.close(fd)
 
 
-def run():
-    print("Running first-install script.")
+def install(verbose=True):
+    if verbose:
+        _log.setLevel(logging.DEBUG)
+    _log.info("Running first-install script.")
     if not sys.platform.startswith('linux'):
-        print("Invalid system platform for installation.")
+        _log.warning("Invalid system platform for installation.")
         return
 
     df_mode = 0o640
     for src, dest in _file_map.items():
+        _log.info("Installing source file: %s to %s", src, dest)
         parent = os.path.split(dest)[0]
         if not os.path.exists(parent):
             try:
+
                 os.mkdir(parent, df_mode)
             except OSError:
                 print("Error creating directory: %s" % parent)
@@ -56,3 +62,9 @@ def run():
 
     except OSError:
         pass
+
+
+def uninstall(verbose=True):
+    if verbose:
+        _log.setLevel(logging.DEBUG)
+    pass

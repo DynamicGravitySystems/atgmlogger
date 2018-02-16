@@ -2,12 +2,9 @@ Dynamic Gravity Systems - Serial Data Recorder
 ==============================================
 
 1. Dependencies:
- 	- Python v3.5, 3.6 and the following modules:
+ 	- Python v3.5 or 3.6 or later, and the following modules:
 		- pyserial >= 3.3
-		- jinja2 >= 2.9.6
-		- MarkupSafe == 1.0
-		- PyYAML == 3.12
-		- RPi.GPIO == 0.6.3
+		- RPi.GPIO >= 0.6.3
 	- The following system packages are required for full functionality of the USB data copying:
 		- ntfs-3g
 		- exfat-fuse
@@ -44,9 +41,24 @@ Dynamic Gravity Systems - Serial Data Recorder
 		sudo make altinstall
 		```
 	
-	2. Installing Python3.6 (armhf) from precompiled binary:
-		- e.g. Built on another raspberry pi and zipped.
-	3. **Configure Raspberry Pi GPIO Console:**
+	2. Install Python3.6 from Debian SID (experimental) repository:
+	    - add the following line to /etc/apt/sources.list:
+	    
+	        ```commandline
+            deb http://http.us.debian.org/debian sid main
+            ```
+            
+        - configure apt-pinning to prevent the system from using experimental repo for system-wide updates
+        
+            ```commandline
+            vim /etc/apt/preferences.d/pinning
+            
+            Package: *
+            Pin: release a=stable
+            Pin-Priority: 700
+            ```
+            
+	4. **Configure Raspberry Pi GPIO Console:**
 		- By default the Raspberry Pi GPIO console is enabled as a TTY terminal, this needs to be disabled to allow it 
 		to be used as a Serial Data input.
 		- Modify /boot/cmdline.txt removing the section similar to: 'console=serial0,115200'
@@ -60,30 +72,12 @@ Dynamic Gravity Systems - Serial Data Recorder
 			``` 
  	
 3. Installation:
-	Use the provided makefile to install the Serial Data Recorder program on a Raspberry PI microcomputer. (See the code snippet below)
+    - The atgmlogger utility is now packaged as a Python Wheel and can be installed via pip:
+    ```commandline
+    sudo pip3 install atgmlogger-0.3.1-py3-none-any.whl
+    ```	
+    This method will create a commandline script in /usr/bin/atgmlogger, which can be invoked to run the logger.
 	
-```commandline
-tar -xzf serial_logger-1.0.tar.gz 
-cd serial_logger
-sudo make install
-
-sudo systemctl status SerialLogger
-  ```
-  
-
-Automated Installation with (GNU) Make:
----------------------------------------
-Execute the following in the package directory:
-```
-make install
-systemctl start SerialLogger
-```
-
-#####Issues:
-
-- Depending on the version of Raspberry Pi, the serial port name (symlink) may vary between /dev/ttyS0 and /dev/ttyAMA0
-  - Raspberry Pi Zero - /dev/ttyAMA0
-  - Raspberry Pi Zero W (Wireless) - /dev/ttyS0
 
 
 Manual Installation:
