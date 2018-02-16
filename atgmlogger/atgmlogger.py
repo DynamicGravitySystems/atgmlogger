@@ -14,9 +14,11 @@ import sys
 import time
 import queue
 import logging
+import logging.config
 import threading
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from pprint import pprint
 
 import serial
 try:
@@ -297,18 +299,30 @@ def run(*argv):
             APPLOG.error("Failed to import/execute first run initialization "
                          "script")
 
-    c_serial = rcParams['serial']
-    c_serial = config.get('serial', dict(port='/dev/serial0', baudrate=57600,
-                                         timeout=1))
-    if args.device is not None:
-        c_serial.update(dict(port=args.device))
-
-    c_usb = config.get('usb', dict(mount="/media/removable", copy_level="data"))
-    c_gpio = config.get('gpio', dict(mode="board", data_led=11, usb_led=13))
-    c_logging = config.get('logging',
-                           dict(logdir="/var/log/{}".format(__name__)))
-    if args.logdir is not None:
-        c_logging.update({"logdir": args.logdir})
+    log_dir = Path(rcParams['logging.logdir']) or Path('~').joinpath('atgmlogger')
+    try:
+        log_dir.mkdir(parents=False, exist_ok=True)
+    except FileNotFoundError:
+        log_dir = Path('.')
+    try:
+        if args.verbose >= 2:
+            print("Applying following dict to logging config:\n")
+            pprint(rcParams['logging'])
+        logging.config.dictConfig(rcParams['logging'])
+        data_log = logging.getLogger()
+        APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+    except (ValueError, TypeError, AttributeError, ImportError):
+        APPLOG.exception("Exception applying logging configuration, fallback "
+                         "configuration will be used.")
+        data_log = logging.getLogger()
+        fpath = str(log_dir.joinpath('gravity.dat').resolve())
+        data_hdlr = TimedRotatingFileHandler(fpath, when='D', interval=7,
+                                             encoding='utf-8', delay=True,
+                                             backupCount=8)
+        data_log.addHandler(data_hdlr)
+        data_log.setLevel(DATA_LVL)
+    else:
+        APPLOG.info("Logging facility configured from rcParams")
 
     # Initialize and Run #
     exit_event = threading.Event()
@@ -316,20 +330,7 @@ def run(*argv):
     cmd_queue = queue.PriorityQueue()
     gpio_queue = queue.PriorityQueue(maxsize=10)
 
-    data_log = logging.getLogger('gravity')
-    log_dir = Path(c_logging['logdir'])
-    try:
-        log_dir.mkdir(parents=False, exist_ok=True)
-    except FileNotFoundError:
-        log_dir = Path('.')
-    fpath = str(log_dir.joinpath('gravity.dat').resolve())
-    data_hdlr = TimedRotatingFileHandler(fpath, when='D', interval=7,
-                                         encoding='utf-8', delay=True,
-                                         backupCount=8)
-    data_log.addHandler(data_hdlr)
-    data_log.setLevel(DATA_LVL)
-
-    hdl = serial.Serial(**c_serial)
+    hdl = serial.Serial(**rcParams['serial'])
     listener = SerialListener(hdl,
                               exit_sig=exit_event,
                               data_queue=data_queue,
@@ -337,7 +338,7 @@ def run(*argv):
 
     threads = []
     if not args.nogpio and HAVE_GPIO:
-        threads.append(GPIOListener(c_gpio,
+        threads.append(GPIOListener(rcParams['gpio'],
                                     gpio_queue=gpio_queue,
                                     exit_sig=exit_event))
 
@@ -349,7 +350,7 @@ def run(*argv):
     threads.append(CommandListener(cmd_queue,
                                    exit_sig=exit_event))
 
-    threads.append(MountListener(c_usb.get('mount', args.mountdir),
+    threads.append(MountListener(rcParams['usb.mount'],
                                  log_dir=log_dir,
                                  exit_sig=exit_event))
 

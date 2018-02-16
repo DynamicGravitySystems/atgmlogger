@@ -5,6 +5,7 @@ import sys
 import copy
 import json
 import logging
+from io import TextIOWrapper
 from typing import Dict
 from pathlib import Path
 
@@ -31,32 +32,49 @@ class _ConfigParams:
     def __init__(self, config: Dict=None, path=None):
         self._default = config or dict()
         self._working = copy.deepcopy(config) or dict()
-        self._path = path
+        self._path = None
 
         if path is not None:
-            self.load_config(path)
+            with Path(path).open('r') as fd:
+                self.load_config(fd)
 
         if not self._default:
-            for cfg in self.cfg_paths:
-                if os.path.exists(cfg):
-                    self.load_config(cfg)
-                    self._path = cfg
+            for cfg in self.cfg_paths:  # type: Path
+                if cfg.exists():
+                    with cfg.open('r') as fd:
+                        self.load_config(fd)
                     break
             else:
                 APPLOG.warning("No configuration file could be located, "
-                               "proceeding with defaults.")
+                               "attempting to load default.")
+                try:
+                    import pkg_resources as pkg
+                    rawfd = pkg.resource_stream(__name__ + '.install',
+                                                '.atgmlogger')
+                    text_wrapper = TextIOWrapper(rawfd, encoding='utf-8')
 
-    def load_config(self, path):
-        if not isinstance(path, Path):
-            path = Path(path)
-        with path.open('r') as fd:
-            try:
-                cfg = json.load(fd)
-            except json.JSONDecodeError:
-                APPLOG.exception("JSON Exception decoding: %s", str(path))
-                cfg = dict()
+                    self.load_config(text_wrapper)
+                except IOError:
+                    APPLOG.exception("Error loading default configuration.")
+                else:
+                    APPLOG.info("Successfully loaded fallback configuration.")
+
+    def load_config(self, descriptor):
+        if not hasattr(descriptor, 'read'):
+            APPLOG.warning("Invalid file descriptor passed to load_config.")
+            return
+        try:
+            cfg = json.load(descriptor)
+        except json.JSONDecodeError:
+            APPLOG.exception("JSON Exception decoding: %s", descriptor.name)
+            cfg = dict()
+        self._path = Path(descriptor.name)
         self._default = cfg
         self._working = copy.deepcopy(cfg)
+
+    def update(self):
+        # TODO: This is too rigid for my liking
+        self._expand_paths(self['logging'], 'filename', self['logging.logdir'])
 
     def get_default(self, key):
         base = self._default
@@ -82,6 +100,10 @@ class _ConfigParams:
         if not self._working:
             self._working = copy.deepcopy(self._default)
         return self._working
+
+    @property
+    def path(self):
+        return self._path
 
     def __getattr__(self, item):
         pass

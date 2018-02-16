@@ -16,7 +16,7 @@ setup(
     author_email='bradyzp@dynamicgravitysystems.com',
     description=__description__,
     install_requires=requirements,
-    python_requires='>=3.6.*',
+    python_requires='>=3.5.*',
     include_package_data=True,
     zip_safe=True,
     entry_points={

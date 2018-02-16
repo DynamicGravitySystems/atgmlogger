@@ -10,6 +10,7 @@ import itertools
 import subprocess
 from typing import Union, Dict
 from pathlib import Path
+from pprint import pprint
 
 from atgmlogger import APPLOG, __description__, __version__, VERBOSITY_MAP
 from atgmlogger import rcParams
@@ -18,37 +19,6 @@ __all__ = ['parse_args', 'decode', 'convert_gps_time', 'timestamp_from_data',
            'set_system_time', 'Blink']
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
-
-
-def level_filter(level):
-    """Return a filter function to be used by a logging handler.
-    This function is referenced in the default logging config file."""
-    def _filter(record):
-        """Filter a record based on level, allowing only records less than
-        the specified level."""
-        if record.levelno < level:
-            return True
-        return False
-    return _filter
-
-
-# TODO: Move to __init__
-def preprocess_log_config(logconf: Dict, logdir=None):
-    logdir = Path(logdir or logconf['logdir'])
-
-    for handler, config in logconf['handlers'].items():  # type: str, Dict
-        if 'filename' in config:
-            fname = config['filename']
-            # Path.resolve() raises FileNotFoundError in Python 3.5 if not exist
-            if sys.version_info.minor < 6:
-                full_path = os.path.join(str(logdir), fname)
-            else:
-                full_path = str(logdir.joinpath(fname).resolve(strict=False))
-        else:
-            continue
-        config['filename'] = full_path
-
-    return logconf
 
 
 def parse_args(argv):
@@ -81,10 +51,18 @@ def parse_args(argv):
     APPLOG.setLevel(log_level)
 
     # Set overrides from arguments
+    if args.config:
+        # This must come first as it will re-initialize the configuration class
+        print("Reloading rcParams with config file: ", args.config)
+        with Path(args.config).open('r') as fd:
+            rcParams.load_config(fd)
     if args.device:
         rcParams['serial.port'] = args.device
     if args.logdir:
         rcParams['logging.logdir'] = args.logdir
+        rcParams.update()
+        print("Updated logging directories, new datafile path: ", rcParams[
+            'logging.handlers.data_hdlr.filename'])
     if args.mountdir:
         rcParams['usb.mount'] = args.mountdir
 

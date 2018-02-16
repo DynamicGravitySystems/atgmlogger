@@ -11,10 +11,9 @@
   "logging": {
     "version": 1,
     "logdir": "/var/log/atgmlogger",
-    "disable_existing_loggers": true,
     "formatters": {
       "data_fmtr": {
-        "format": "%{message)s"
+        "format": "%(message)s"
       },
       "applog_fmtr": {
         "format": "%(levelname)s::%(asctime)s (%(funcName)s) - %(message)s",
@@ -23,7 +22,7 @@
     },
     "filters": {
       "data_filter": {
-        "()": "common.level_filter",
+        "()": "atgmlogger.logger.level_filter",
         "level": 60
       }
     },
@@ -50,7 +49,7 @@
         "filename": "application.log",
         "when": "MIDNIGHT",
         "interval": 7,
-        "backupcount": 52,
+        "backupCount": 52,
         "encoding": "utf-8",
         "level": "INFO",
         "filters": ["data_filter"]

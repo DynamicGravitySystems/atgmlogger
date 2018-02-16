@@ -1,4 +1,4 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
 import os
 import sys
@@ -10,12 +10,15 @@ import time
 import queue
 import multiprocessing as mp
 from pathlib import Path
+from pprint import pprint
 
 from atgmlogger import atgmlogger, common, _ConfigParams
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 _log.addHandler(logging.StreamHandler(stream=sys.stderr))
+
+SLEEPTIME = os.getenv('SLEEPTIME', .5)
 
 
 def join_threads(threads, timeout=0.1):
@@ -50,7 +53,8 @@ def test_at1logger(handle, logger, sigExit):
         in_list.append(decoded)
         handle.write(data)
 
-    time.sleep(.15)
+    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
+    time.sleep(SLEEPTIME)
     sigExit.set()
     join_threads(threads)
 
@@ -80,7 +84,8 @@ def test_mproc_queue(handle, logger, sigExit):
         in_list.append(decoded)
         handle.write(raw)
 
-    time.sleep(.15)
+    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
+    time.sleep(SLEEPTIME)
     sigExit.set()
     join_threads(threads)
 
@@ -145,22 +150,11 @@ def test_timestamp_from_data():
     assert res is None
 
 
-def test_logger_preprocess(cfg_dict):
-    log_conf = copy.deepcopy(cfg_dict['logging'])
-    handlers = log_conf['handlers']
-    data_name = handlers['data_hdlr']['filename']
-    appl_name = handlers['applog_hdlr']['filename']
-    common.preprocess_log_config(log_conf, logdir='test/logs')
-
-    expected = str(Path('test/logs').resolve().joinpath(data_name))
-    assert log_conf['handlers']['data_hdlr']['filename'] == expected
-    expected = str(Path('test/logs').resolve().joinpath(appl_name))
-    assert log_conf['handlers']['applog_hdlr']['filename'] == expected
-
-
 def test_parse_args():
     from atgmlogger import rcParams
-    rcParams.load_config(Path('test/.atgmlogger'))
+    cfg_path = Path('test/.atgmlogger')
+    with cfg_path.open('r') as fd:
+        rcParams.load_config(fd)
     argv = ['atgmlogger.py', '-vvv', '-c', 'test/.atgmlogger', '--logdir',
             '/var/log/atgmlogger']
     args = common.parse_args(argv)
@@ -179,7 +173,7 @@ def test_config(cfg_dict):
     # Test config getter with arbitrary depths
     assert cfg['logging.version'] == 1
     assert cfg['usb.copy_level'] == "debug"
-    assert cfg['logging.filters.data_filter.level'] == 60
+    assert cfg['logging.filters.data_filter.level'] == 75
     assert cfg['logging.handlers.applog_hdlr.filters'] == ["data_filter"]
     assert isinstance(cfg['serial'], dict)
 
@@ -189,8 +183,19 @@ def test_config(cfg_dict):
     # Ensure that original copy remains unchanged
     assert cfg._default['serial']['port'] == orig
     assert cfg['serial.port'] == 'COM0'
-
     assert cfg._default == orig_cfg
+
+
+def test_fallback_config(cfg_dict):
+    # Test ConfigParams loading when no configuration file is available
+    for path in _ConfigParams.cfg_paths:
+        # Make sure none of the search paths exist or this will skew the test
+        assert not path.exists()
+    cfg = _ConfigParams()
+    # Selectively exclude logging node due to filepath expansion
+    # Don't feel like fixing that yet.
+    for node in ['version', 'serial', 'usb', 'gpio']:
+        assert cfg[node] == cfg_dict[node]
 
 
 def test_config_default(cfg_dict):
@@ -226,12 +231,4 @@ def test_expand_path(cfg_dict):
 
     assert (cfg['logging.handlers.data_hdlr.filename'] ==
             os.path.normpath('/var/log/gravdata.dat'))
-
-
-
-
-
-
-
-
 
