@@ -97,7 +97,7 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     try:
         pkg_name = path or "%s.plugins" % __package__.split('.')[0]
         plugin = import_module(".%s" % name, package=pkg_name)
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         raise
     klass = getattr(plugin, '__plugin__')
     if isinstance(klass, str):

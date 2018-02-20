@@ -99,6 +99,6 @@ def test_load_subclassed_plugin(dispatcher):
 
 
 def test_bad_plugin_path():
-    with pytest.raises(ModuleNotFoundError):
+    with pytest.raises(ImportError):
         load_plugin('basic_plugin', path='atgmlogger')
 
