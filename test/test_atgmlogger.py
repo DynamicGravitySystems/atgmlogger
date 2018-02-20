@@ -12,7 +12,11 @@ import multiprocessing as mp
 from pathlib import Path
 from pprint import pprint
 
+import pytest
+
 from atgmlogger import atgmlogger, common, _ConfigParams
+from atgmlogger.logger import DataLogger
+from atgmlogger.plugins import gpio, load_plugin
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -23,26 +27,57 @@ SLEEPTIME = float(os.getenv('SLEEPTIME', .5))
 
 def join_threads(threads, timeout=0.1):
     for thread in threads:
-        try:
-            thread.join(timeout=timeout)
-        except:
-            continue
+        thread.join(timeout=timeout)
+
+
+def test_atgmlogger_dispatcher(handle, dispatcher):
+    from .dispatch_modules import LoggerAdapter
+    dispatcher.register(LoggerAdapter)
+    listener = atgmlogger.SerialListener(handle, dispatcher.message_queue)
+    dispatcher.start()
+
+    # Put listener in a Thread for testing control
+    listener_th = threading.Thread(target=listener.listen, name='test_listener')
+    listener_th.start()
+
+    expected = []
+    for i in range(10):
+        utf = "Line: {}".format(i)
+        expected.append((75, utf))
+        raw = (utf + "\n").encode('latin-1')
+        handle.write(raw)
+
+    time.sleep(.2)
+
+    dispatcher.exit(join=True)
+    listener.exit()
+
+    data_logger = dispatcher.get_instance(LoggerAdapter)
+    assert expected == data_logger.data()
+
+
+@pytest.mark.skip
+def test_atgmlogger_plugins(rcParams):
+    # This is causing errors in the test_dispatcher suite, maybe the
+    # registration happening twice?
+    plugins = rcParams['plugins']
+    for key in ['gpio', 'usb', 'timesync']:
+        assert key in plugins
+
+    for plugin in plugins:
+        load_plugin(plugin, register=True, **plugins[plugin])
 
 
 def test_at1logger(handle, logger, sigExit):
+    """Tests the old way of running atgmlogger before dispatcher"""
     data_queue = queue.Queue()
     atgm = atgmlogger.SerialListener(handle,
-                                     data_queue=data_queue,
-                                     exit_sig=sigExit)
+                                     collector=data_queue)
     listen_th = threading.Thread(target=atgm.listen, name='listener')
 
-    cmd_listener = atgmlogger.CommandListener(atgm.commands,
-                                              exit_sig=sigExit)
-    writer = atgmlogger.DataLogger(data_queue,
-                                   logger=logger,
-                                   exit_sig=sigExit)
+    writer = DataLogger(data_queue, logger=logger, exit_sig=sigExit)
 
-    threads = [listen_th, cmd_listener, writer]
+    threads = [listen_th, writer]
     for thread in threads:
         thread.start()
 
@@ -56,22 +91,18 @@ def test_at1logger(handle, logger, sigExit):
     _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
     time.sleep(SLEEPTIME)
     sigExit.set()
+    atgm.exit()
     join_threads(threads)
 
-    assert in_list == writer._internal_copy
     assert in_list == logger.accumulator
 
 
 def test_mproc_queue(handle, logger, sigExit):
     # Test use of multiprocessing.Queue with listener and DataLogger
     data_queue = mp.Queue()
-    atgm = atgmlogger.SerialListener(handle,
-                                     data_queue=data_queue,
-                                     exit_sig=sigExit)
+    atgm = atgmlogger.SerialListener(handle, collector=data_queue)
     listener = threading.Thread(target=atgm.listen, name='listener')
-    writer = atgmlogger.DataLogger(data_queue,
-                                   logger=logger,
-                                   exit_sig=sigExit)
+    writer = DataLogger(data_queue, logger=logger, exit_sig=sigExit)
 
     threads = [listener, writer]
     for thread in threads:
@@ -87,19 +118,17 @@ def test_mproc_queue(handle, logger, sigExit):
     _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
     time.sleep(SLEEPTIME)
     sigExit.set()
+    atgm.exit()
     join_threads(threads)
 
-    assert in_list == writer._internal_copy
+    # assert in_list == writer._internal_copy
     assert in_list == logger.accumulator
 
 
 def test_gpio_failure(sigExit):
-    # Test that GPIO fails gracefully
-    gpio_th = atgmlogger.GPIOListener({},
-                                      gpio_queue=queue.PriorityQueue(),
-                                      exit_sig=sigExit)
-
-    gpio_th.start()
+    with pytest.raises(RuntimeError):
+        gpio_pl = gpio.GPIOListener()
+        gpio_pl.start()
 
 
 def test_decode():

@@ -1,9 +1,4 @@
-#!/usr/bin/python3
-
-"""Oneshot service to be activated on USB device mount.
-Copies data/log files from DGS logger service to removable device.
-
-"""
+# -*- coding: utf-8 -*-
 
 import os
 import re
@@ -18,6 +13,7 @@ from pathlib import Path
 from typing import List
 
 from atgmlogger import APPLOG
+from . import PluginInterface
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -91,20 +87,16 @@ def _filehook(pattern):
     return inner
 
 
-class RemovableStorageHandler(threading.Thread):
-    def __new__(cls, *args, **kwargs):
-        return super().__new__(cls)
-        pass
+class RemovableStorageHandler(PluginInterface):
+    options = ['mountpath', 'logdir', 'patterns']
 
-    def __init__(self, usb_path, log_dir, gpio_queue=None):
-        super().__init__(name=self.__class__.__name__)
+    def __init__(self):
+        super().__init__()
 
-        self.devpath = Path(usb_path)
-        self.log_dir = Path(log_dir)
-        if not self.log_dir.is_dir():
-            self.log_dir = self.log_dir.parent
+        self.mountpath = Path('/media/removable')
+        self.log_dir = None
+        self.patterns = ['*.dat', '*.log']
 
-        self._copy_globs = ['*.dat', '*.log']
         self._current_path = None
         self._last_copy_time = None
         self._umount_flag = threading.Event()
@@ -120,9 +112,11 @@ class RemovableStorageHandler(threading.Thread):
                     member.__name__)
 
     def run(self):
-        if not os.path.ismount(self.devpath):
+        if not self.configured:
+            raise ValueError("RemovableStorageHandler has not been configured.")
+        if not os.path.ismount(self.mountpath):
             APPLOG.error("{path} is not mounted or is not a valid mount point."
-                         .format(path=self.devpath))
+                         .format(path=self.mountpath))
             return 1
 
         for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
@@ -136,16 +130,24 @@ class RemovableStorageHandler(threading.Thread):
             # os.sync is not available on Windows
             pass
         finally:
-            umount(self.devpath)
+            umount(self.mountpath)
+
+    def configure(self, **options):
+        super().configure(**options)
+        if 'mountpath' in options:
+            self.mountpath = Path(self.mountpath)
+        if 'logdir' in options:
+            self.log_dir = Path(getattr(self, 'logdir'))
+            if not self.log_dir.is_dir():
+                self.log_dir = self.log_dir.parent
 
     @_runhook(priority=1)
     def copy_logs(self):
-        print("Copy Logs Called")
         APPLOG.debug("Processing copy_logs")
         file_list = []  # type: List[Path]
         copy_size = 0   # Accumulated size of logs in bytes
 
-        for pattern in self._copy_globs:
+        for pattern in self.patterns:
             file_list.extend(self.log_dir.glob(pattern))
 
         for file in file_list:
@@ -161,11 +163,11 @@ class RemovableStorageHandler(threading.Thread):
                 return -1
             return statvfs.f_bsize * statvfs.f_bavail
 
-        if copy_size > get_free(self.devpath):
+        if copy_size > get_free(self.mountpath):
             APPLOG.warning("Total size of datafiles to be copied is greater "
                          "than free-space on device.")
 
-        dest_dir = self.devpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
+        dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
         dest_dir.mkdir()
 
         for srcfile in file_list:
@@ -186,7 +188,7 @@ class RemovableStorageHandler(threading.Thread):
     @_runhook(priority=2)
     def watch_files(self):
         APPLOG.debug("Processing watch_files")
-        root_files = [file.name for file in self.devpath.iterdir() if
+        root_files = [file.name for file in self.mountpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)
         for pattern in self._file_hooks.keys():
@@ -198,3 +200,6 @@ class RemovableStorageHandler(threading.Thread):
     def clear_logs(self, pattern):
         print("self is: ", self)
         print("pattern is: ", pattern)
+
+
+__plugin__ = RemovableStorageHandler

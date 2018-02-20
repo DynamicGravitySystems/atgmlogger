@@ -60,9 +60,6 @@ class _ConfigParams:
                     APPLOG.info("Successfully loaded fallback configuration.")
 
     def load_config(self, descriptor):
-        if not hasattr(descriptor, 'read'):
-            APPLOG.warning("Invalid file descriptor passed to load_config.")
-            return
         try:
             cfg = json.load(descriptor)
         except json.JSONDecodeError:
@@ -123,9 +120,6 @@ class _ConfigParams:
         for part in path:
             base = base.setdefault(part, {})
         base[last] = value
-
-    def __str__(self):
-        return ''
 
 
 rcParams = _ConfigParams()

@@ -69,5 +69,20 @@
     "mode": "board",
     "data_led": 11,
     "usb_led": 13
+  },
+  "plugins": {
+    "gpio": {
+        "mode": "board",
+        "data_led": 11,
+        "usb_led": 13
+    },
+    "usb": {
+        "mountpath": "/media/removable",
+        "logdir": "/var/log/atgmlogger",
+        "patterns": ["*.dat", "*.log"]
+    },
+    "timesync": {
+        "interval": 1000
+    }
   }
 }

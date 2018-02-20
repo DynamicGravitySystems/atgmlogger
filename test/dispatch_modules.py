@@ -1,9 +1,15 @@
 # -*- coding: utf-8 -*-
 
 # PyTest utility module containing Dispatch test modules
+import logging
 import threading
 import queue
-from atgmlogger.dispatcher import Dispatcher, ModuleInterface
+
+from atgmlogger.plugins import PluginInterface
+from atgmlogger.dispatcher import Dispatcher
+from atgmlogger.logger import DataLogger
+
+_log = logging.getLogger(__name__)
 
 
 class SimplePacket:
@@ -15,14 +21,12 @@ class SimplePacket:
 
 
 @Dispatcher.register
-class BasicModule(ModuleInterface):
+class BasicModule(PluginInterface):
     consumerType = SimplePacket
-    # accumulator = []  # For testing assertion purposes
 
     def __init__(self):
         super().__init__()
         self._exitSig = threading.Event()
-        self._queue = queue.Queue()
         self.accumulator = []
 
     def run(self):
@@ -40,14 +44,14 @@ class BasicModule(ModuleInterface):
 
 
 @Dispatcher.register
-class ComplexModule(ModuleInterface):
+class ComplexModule(PluginInterface):
     consumerType = SimplePacket
 
     def __init__(self):
         super().__init__()
         self._exitSig = threading.Event()
-        self._queue = queue.Queue()
         self.accumulator = []
+        self.count = 0
 
     def run(self):
         while not self.exiting:
@@ -55,9 +59,30 @@ class ComplexModule(ModuleInterface):
                 item = self.queue.get(block=True, timeout=0.1)
             except queue.Empty:
                 continue
+            self.count += 1
             self.accumulator.append(item.value * 10)
+            # if self.count < 10:
+            #     _log.debug("Put {} into accumulator".format(item))
             self.queue.task_done()
 
     def configure(self, **options):
         pass
+
+
+class TestLogger:
+    def __init__(self):
+        self.data = []
+
+    def log(self, level, data):
+        self.data.append((level, data))
+
+
+class LoggerAdapter(DataLogger):
+    def __init__(self):
+        super().__init__()
+        self._logger = TestLogger()
+
+    def data(self):
+        return self._logger.data
+
 

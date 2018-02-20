@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
 
-import abc
 import logging
 import threading
 import queue
-from importlib import import_module
 from weakref import WeakSet
 
 _log = logging.getLogger()
@@ -66,83 +64,58 @@ p1 = PluginWrapper()
 """
 
 
-class ModuleInterface(threading.Thread, metaclass=abc.ABCMeta):
-    consumerType = None
-
-    def __init__(self):
-        super().__init__()
-        self._exitSig = threading.Event()
-        self._queue = queue.Queue()
-
-    @abc.abstractmethod
-    def run(self):
-        pass
-
-    @abc.abstractmethod
-    def configure(self, **options):
-        pass
-
-    def exit(self, join=False):
-        if join:
-            self._queue.join()
-        self._exitSig.set()
-
-    def put(self, item):
-        if isinstance(item, self.consumerType):
-            self._queue.put_nowait(item)
-
-    @property
-    def exiting(self):
-        return self._exitSig.is_set()
-
-    @property
-    def queue(self) -> queue.Queue:
-        return self._queue
-
-
-def load_plugin(name, path=None):
-    try:
-        pkg_name = path or f"{__package__}.plugins"
-        plugin = import_module(".%s" % name, package=pkg_name)
-    except (ImportError, ModuleNotFoundError):
-        raise
-    base = getattr(plugin, 'PLUGIN', None)
-    if base is not None:
-        wrapper = type(name, (base, ModuleInterface), {})
-        return wrapper
-    else:
-        return None
-
-
 class Dispatcher(threading.Thread):
-    _dispatch_registry = WeakSet()  # rename to _listeners?
+    _listeners = WeakSet()
+    _oneshots = WeakSet()
+    _params = {}
 
     @classmethod
     def register(cls, klass, **params):
-        if klass not in cls._dispatch_registry:
+        if klass not in cls._listeners:
             _log.debug("Registering class in dispatcher: {}".format(klass))
-            cls._dispatch_registry.add(klass)
+            cls._listeners.add(klass)
+            cls._params[klass] = params
         return klass
 
     @classmethod
-    def registered_modules(cls):
-        return cls._dispatch_registry
+    def detach(cls, klass):
+        if klass in cls._listeners:
+            cls._listeners.remove(klass)
+            del cls._params[klass]
+
+    @classmethod
+    def registered_listeners(cls):
+        return cls._listeners
 
     def __init__(self, sigExit=None):
         super().__init__(name=self.__class__.__name__)
         self.sigExit = sigExit or threading.Event()
         self._queue = queue.Queue()
-        self._enabled = WeakSet({klass for klass in self._dispatch_registry})
         self._threads = []
+
+    @property
+    def message_queue(self):
+        return self._queue
 
     def put(self, item):
         self._queue.put_nowait(item)
 
     def run(self):
-        self._threads = [klass() for klass in self._dispatch_registry if
-                         klass in self._enabled]
-        for thread in self._threads:
-            thread.start()
+        # TODO: are there some threads that we could instantiate only when an
+        #  appropriate object has been received on the queue?
+        # Perhaps some that will destroy themselves after their task is
+        # complete and require new thread every time (infrequent events like
+        # USB copy job)
+        for listener in self._listeners:
+            try:
+                instance = listener()
+                instance.configure(**self._params[listener])
+            except TypeError:
+                _log.exception("Error instantiating listener.")
+                continue
+            else:
+                instance.start()
+                self._threads.append(instance)
 
         while not self.sigExit.is_set():
             try:
@@ -153,21 +126,21 @@ class Dispatcher(threading.Thread):
                 if isinstance(item, thread.consumerType):
                     thread.put(item)
             self._queue.task_done()
+
         for thread in self._threads:
             thread.exit(join=True)
 
-    def exit(self):
-        _log.debug("Waiting for queue to empty.")
-        self._queue.join()
-        _log.debug("Queue joined, setting sigExit")
+    def exit(self, join=False):
+        if join:
+            _log.debug("Waiting for queue to empty.")
+            self._queue.join()
+            _log.debug("Queue joined, setting sigExit")
         self.sigExit.set()
-
-    def detach(self, klass):
-        if klass in self._enabled:
-            self._enabled.remove(klass)
 
     def get_instance(self, klass):
         for obj in self._threads:
+            _log.debug("Got obj: {}".format(obj))
             if isinstance(obj, klass):
+                _log.debug("Obj is instance of klass: {}".format(klass))
                 return obj
-        return None
+

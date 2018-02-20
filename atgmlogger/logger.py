@@ -1,9 +1,10 @@
 # coding: utf-8
 
 import queue
-import threading
-from .common import Blink
+import logging
 from atgmlogger import APPLOG
+from .plugins import PluginInterface
+from .dispatcher import Dispatcher
 __all__ = ['DataLogger']
 
 DATA_LVL = 75
@@ -21,47 +22,51 @@ def level_filter(level):
     return _filter
 
 
-class DataLogger(threading.Thread):
+@Dispatcher.register
+class DataLogger(PluginInterface):
     """
-    Parameters
-    ----------
-    data_queue : Union[queue.Queue, mp.Queue]
-    logger : logging.Logger
-    exit_sig : threading.Event
-    gpio_queue : queue.PriorityQueue
+    DataLogger conforms to the PluginInterface spec but is not really
+    intended to be pluggable or optional.
+    It should be explicitly
+    imported/loaded in the main program logic/init.
+    DataLogger is designed to simply process data from a queue and log it to
+    a python logging logger - typically to a file as defined in the program
+    configuration (see rcParams).
     """
-    # TODO: Pass logger config dict here for init?
-    def __init__(self, data_queue, logger, exit_sig, gpio_queue=None):
-        super().__init__(name=self.__class__.__name__)
-        self._data_queue = data_queue
-        self._exiting = exit_sig
-        self._logger = logger
-        self._internal_copy = []
-        self._gpio_queue = gpio_queue or queue.PriorityQueue()
+    options = ['timeout', 'loggername', 'datalvl']
+    consumerType = str
 
-        # TODO: Infer data rate to better control blinking
-        self._blink_data = Blink(11, frequency=0.05)
+    def __init__(self, data_queue=None, logger=None, exit_sig=None):
+        super().__init__()
+
+        # For compatibility - TODO: Determine if these should be kept
+        if data_queue is not None:
+            self.queue = data_queue
+        if exit_sig is not None:
+            self._exitSig = exit_sig
+
+        self._logger = logger or logging.getLogger(__name__)
+        self.timeout = 0.1
 
     def run(self):
-        while not self._exiting.is_set() or not self._data_queue.empty():
+        while not self.exiting:
             try:
-                data = self._data_queue.get(block=True, timeout=0.1)
-                self._internal_copy.append(data)
+                data = self.get(block=True, timeout=self.timeout)
                 self._logger.log(DATA_LVL, data)
-                self._gpio_queue.put_nowait(self._blink_data)
             except queue.Empty:
-                # Using timeout and empty exception allows for thread to
-                # check exit signal
-                continue
-            except queue.Full:
                 continue
             except FileNotFoundError:
                 APPLOG.error("Log handler file path not found, data will not "
-                              "be saved.")
+                             "be saved.")
             try:
-                self._data_queue.task_done()
+                self.queue.task_done()
             except AttributeError:
                 # In case of multiprocessing.Queue
                 pass
 
         APPLOG.debug("Exiting DataLogger thread.")
+
+    def configure(self, **options):
+        super().configure(**options)
+        if 'loggername' in options:
+            self._logger = logging.getLogger(options['loggername'])

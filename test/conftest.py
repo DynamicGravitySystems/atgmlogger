@@ -5,6 +5,9 @@ import json
 import serial
 import threading
 
+from atgmlogger import _ConfigParams
+from atgmlogger.dispatcher import Dispatcher
+
 
 @pytest.fixture(scope="module", params=["test/.atgmlogger"])
 def cfg_dict(request):
@@ -13,9 +16,16 @@ def cfg_dict(request):
     return config
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
+def rcParams():
+    return _ConfigParams(path='test/.atgmlogger')
+
+
+@pytest.fixture()
 def handle():
-    return serial.serial_for_url('loop://', baudrate=57600, timeout=0.1)
+    hdl = serial.serial_for_url('loop://', baudrate=57600, timeout=0.1)
+    yield hdl
+    hdl.close()
 
 
 @pytest.fixture
@@ -33,5 +43,11 @@ def logger():
 def sigExit():
     sig = threading.Event()
     yield sig
-    if not sig.is_set():
-        sig.set()
+    sig.set()
+
+
+@pytest.fixture
+def dispatcher():
+    disp = Dispatcher()
+    yield disp
+    disp.exit()
