@@ -10,8 +10,8 @@ from atgmlogger.plugins import PluginInterface, load_plugin
 root_log = logging.getLogger()
 if len(root_log.handlers):
     hdl0 = root_log.handlers[0]
-    hdl0.setFormatter(logging.Formatter("%(msecs)d::%(levelname)s - %("
-                                        "message)s"))
+    hdl0.setFormatter(logging.Formatter("%(msecs)d::%(levelname)s - "
+                                        "%(funcName)s %(message)s"))
 
 Q_LEN = int(os.getenv('QUEUELENGTH', '5000'))
 LOG_LVL = os.getenv('LOGLVL', 'DEBUG')
@@ -23,6 +23,8 @@ def test_dispatch(dispatcher):
     received Queue items based on their type to registered listeners."""
     assert not dispatcher.is_alive()
     from .dispatch_modules import BasicModule, ComplexModule, SimplePacket
+    dispatcher.register(BasicModule)
+    dispatcher.register(ComplexModule)
     for klass in [BasicModule, ComplexModule]:
         assert klass in dispatcher.registered_listeners()
 
@@ -45,6 +47,8 @@ def test_dispatch(dispatcher):
 def test_dispatch_selective_load(dispatcher):
     assert not dispatcher.is_alive()
     from .dispatch_modules import BasicModule, ComplexModule, SimplePacket
+    dispatcher.register(BasicModule)
+    dispatcher.register(ComplexModule)
     dispatcher.detach(ComplexModule)
     dispatcher.start()
     for i in range(Q_LEN):
@@ -60,6 +64,8 @@ def test_dispatch_selective_load(dispatcher):
 
 
 def test_load_plugin(dispatcher):
+    from . import plugins  # this is needed for some reason due to relative
+    # import
     plugin = load_plugin('basic_plugin', path="%s.plugins" % __package__,
                          register=True)
     assert plugin in dispatcher.registered_listeners()
@@ -77,6 +83,7 @@ def test_load_plugin(dispatcher):
 
 
 def test_load_subclassed_plugin(dispatcher):
+    from . import plugins
     plugin = load_plugin('subclassed_plugin', path="%s.plugins" % __package__,
                          register=False)
     assert plugin not in dispatcher.registered_listeners()

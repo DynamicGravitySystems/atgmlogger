@@ -27,8 +27,11 @@ class GPIOListener(PluginInterface):
                                "cannot run.")
         self.outputs = []
         self.modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
+        self.data_pin = 11
+        self.usb_pin = 13
 
     def configure(self, **options):
+        _APPLOG.debug("Configuring GPIO with options: {}".format(options))
         super().configure(**options)
         _mode = self.modes[getattr(self, 'mode', 'board')]
         gpio.setmode(_mode)
@@ -70,4 +73,4 @@ class GPIOListener(PluginInterface):
 if HAVE_GPIO:
     __plugin__ = GPIOListener
 else:
-    __plugin__ = None
+    raise ImportError("GPIO Not available on this system.")

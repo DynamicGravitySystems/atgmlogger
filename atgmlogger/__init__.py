@@ -10,13 +10,14 @@ from typing import Dict
 from pathlib import Path
 
 __all__ = ['atgmlogger', 'common', 'APPLOG', 'VERBOSITY_MAP', '__version__',
-           '__description__', 'rcParams']
+           '__description__', 'rcParams', 'TIMEOUT']
 
-__version__ = '0.3.1'
+__version__ = '0.3.2'
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
 
 
 VERBOSITY_MAP = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
+TIMEOUT = float(os.getenv("ATGM_TIMEOUT", "0.5"))
 APPLOG = logging.getLogger()
 APPLOG.addHandler(logging.StreamHandler(sys.stderr))
 APPLOG.setLevel(VERBOSITY_MAP[0])
@@ -68,29 +69,13 @@ class _ConfigParams:
         self._path = Path(descriptor.name)
         self._default = cfg
         self._working = copy.deepcopy(cfg)
-
-    def update(self):
-        # TODO: This is too rigid for my liking
-        self._expand_paths(self['logging'], 'filename', self['logging.logdir'])
+        APPLOG.info("New rcParams configuration loaded.")
 
     def get_default(self, key):
         base = self._default
         for part in key.split('.'):
             base = base.get(part, None)
         return base or None
-
-    def _expand_paths(self, leaf, key, base_path):
-        """Expand filenames within logging configuration section"""
-        if not self._default:
-            return
-
-        for k, v in leaf.items():
-            if k == key:
-                expanded = os.path.normpath(os.path.join(base_path, v))
-                leaf[k] = expanded
-                continue
-            elif isinstance(v, dict):
-                self._expand_paths(v, key, base_path)
 
     @property
     def config(self):
@@ -102,13 +87,12 @@ class _ConfigParams:
     def path(self):
         return self._path
 
-    def __getattr__(self, item):
-        pass
-
     def __getitem__(self, key: str):
         base = self.config
         for part in key.split('.'):
             base = base.get(part, {})
+        if isinstance(base, dict):
+            return copy.deepcopy(base) or None
         return base or None
 
     def __setitem__(self, key, value):
@@ -120,6 +104,7 @@ class _ConfigParams:
         for part in path:
             base = base.setdefault(part, {})
         base[last] = value
+        print("Set {} to {}".format(last, value))
 
 
 rcParams = _ConfigParams()

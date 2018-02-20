@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 """
@@ -9,7 +8,6 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 
 """
 
-import os
 import sys
 import time
 import queue
@@ -17,6 +15,7 @@ import logging
 import logging.config
 import threading
 from pathlib import Path
+# from pprint import pprint
 
 import serial
 
@@ -28,15 +27,6 @@ from . import VERBOSITY_MAP, APPLOG, rcParams
 DATA_LVL = 75
 
 
-# TODO: Determine how/if data string should be encapsulated
-class DataRecord:
-    __slots__ = ['data', 'timestamp']
-
-    def __init__(self, data, timestamp):
-        self.data = data
-        self.timestamp = timestamp
-
-
 class SerialListener:
     """"
     Redesign of SerialLogger to achieve greater separation of responsibilities,
@@ -46,8 +36,8 @@ class SerialListener:
     capturing raw serial data from a serial device.
     Ingested serial data is pushed onto a Queue for consumption by another
     thread or subprocess. This is to ensure that ideally no serial data is
-    lost due to the listener waiting for a write event to complete (
-    especially at higher data rates).
+    lost due to the listener waiting for a write event to complete
+    (especially at higher data rates).
 
     Parameters
     ----------
@@ -98,28 +88,44 @@ class SerialListener:
         self._handle.close()
 
 
-def firstrun():
-    # Attempt to run first-run installation script
-    if not os.path.exists("/etc/%s/.atgmlogger" % __name__):
-        APPLOG.info("Configuring ATGMLogger for first run.")
-        try:
-            from . import install
-            install.install(verbose=True)
+def _expand_log_paths(base, prefix, key='filename'):
+    """Traverse a given 'base' dictionary searching for key (
+    default='filename'), and update the key's value by prepending the
+    specified prefix to it.
+    The base dictionary is recursively traversed (searching all
+    sub-dictionaries) to find any of the specified key.
 
-        except (ImportError, RuntimeError):
-            APPLOG.exception("Failed to import/execute first run "
-                             "initialization script")
+    Parameters
+    ----------
+    base : dict
+        The base dictionary to begin the recursive search and update.
+    prefix : str or Path
+
+    """
+    if not isinstance(prefix, Path):
+        prefix = Path(prefix)
+    for k, v in base.items():
+        if k == 'filename':
+            expanded = prefix.joinpath(v)
+            base[k] = str(expanded)
+        elif isinstance(v, dict):
+            _expand_log_paths(v, prefix, key=key)
 
 
 def _configure_logger():
-    log_dir = Path(rcParams['logging.logdir']) or Path('~').joinpath('atgmlogger')
+    log_dir = Path(rcParams['logging.logdir']) or \
+              Path('~').expanduser().joinpath('atgmlogger')
+
     APPLOG.debug("Logging path set to: %s", str(log_dir))
     try:
         log_dir.mkdir(parents=False, exist_ok=True)
     except FileNotFoundError:
         log_dir = Path('.')
     try:
-        logging.config.dictConfig(rcParams['logging'])
+        log_conf = rcParams['logging']
+        _expand_log_paths(log_conf, log_dir, key='filename')
+
+        logging.config.dictConfig(log_conf)
         _log = logging.getLogger()
     except (ValueError, TypeError, AttributeError, ImportError):
         APPLOG.exception("Exception applying logging configuration, fallback "
@@ -140,16 +146,13 @@ def _configure_logger():
 def run(*argv):
     if argv is None:
         argv = sys.argv
+    APPLOG.debug("Run received arguments: {}".format(argv))
 
     # Init Performance Counter
     t_start = time.perf_counter()
 
     args = parse_args(argv)
     APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
-
-    # Do first run install stuff
-    firstrun()
-    # Configure Logging
     _configure_logger()
 
     dispatcher = Dispatcher()
@@ -159,11 +162,16 @@ def run(*argv):
     dispatcher.register(DataLogger)
 
     plugins = rcParams['plugins']
-    for plugin in plugins:
-        try:
-            load_plugin(plugin, register=True, **plugins[plugin])
-        except (ImportError, ModuleNotFoundError):
-            APPLOG.warning("Plugin %s could not be loaded.", plugin)
+    if plugins is not None:
+        for plugin in plugins:
+            try:
+                load_plugin(plugin, register=True, **plugins[plugin])
+                APPLOG.info("Loaded plugin: %s", plugin)
+            except (ImportError, ModuleNotFoundError):
+                if args.verbose is not None and args.verbose > 2:
+                    APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
+                else:
+                    APPLOG.warning("Plugin <%s> could not be loaded.", plugin)
 
     hdl = serial.Serial(**rcParams['serial'])
     listener = SerialListener(hdl, collector=dispatcher.message_queue)

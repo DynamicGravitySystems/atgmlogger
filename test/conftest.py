@@ -4,12 +4,13 @@ import pytest
 import json
 import serial
 import threading
+from pathlib import Path
 
 from atgmlogger import _ConfigParams
 from atgmlogger.dispatcher import Dispatcher
 
 
-@pytest.fixture(scope="module", params=["test/.atgmlogger"])
+@pytest.fixture(scope="module", params=["atgmlogger/install/.atgmlogger"])
 def cfg_dict(request):
     with open(request.param, 'r') as fd:
         config = json.load(fd)
@@ -18,7 +19,7 @@ def cfg_dict(request):
 
 @pytest.fixture
 def rcParams():
-    return _ConfigParams(path='test/.atgmlogger')
+    return _ConfigParams(path='atgmlogger/install/.atgmlogger')
 
 
 @pytest.fixture()
@@ -51,3 +52,9 @@ def dispatcher():
     disp = Dispatcher()
     yield disp
     disp.exit()
+    disp.detach_all()
+
+
+@pytest.fixture(params=["/var/log/", Path("/var/log")])
+def logpath(request):
+    return request.param

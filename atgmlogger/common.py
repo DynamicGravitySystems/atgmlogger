@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import os
 import sys
 import shlex
 import logging
@@ -8,9 +7,8 @@ import argparse
 import datetime
 import itertools
 import subprocess
-from typing import Union, Dict
+from typing import Union
 from pathlib import Path
-from pprint import pprint
 
 from atgmlogger import APPLOG, __description__, __version__, VERBOSITY_MAP
 from atgmlogger import rcParams
@@ -23,10 +21,12 @@ ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
 
 def parse_args(argv):
     """Parse arguments from commandline and load configuration file."""
+    if not len(argv):
+        argv = ['atgmlogger']
     parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
     parser.add_argument('-V', '--version', action='version',
                         version=__version__)
-    parser.add_argument('-v', '--verbose', action='count',
+    parser.add_argument('-v', '--verbose', action='count', default=0,
                         help="Enable verbose logging.")
     parser.add_argument('-d', '--device', action='store',
                         help="Serial device path")
@@ -66,16 +66,15 @@ def parse_args(argv):
     # Set overrides from arguments
     if args.config:
         # This must come first as it will re-initialize the configuration class
-        print("Reloading rcParams with config file: ", args.config)
+        APPLOG.info("Reloading rcParams with config file: %s", args.config)
         with Path(args.config).open('r') as fd:
             rcParams.load_config(fd)
     if args.device:
         rcParams['serial.port'] = args.device
     if args.logdir:
         rcParams['logging.logdir'] = args.logdir
-        rcParams.update()
-        print("Updated logging directories, new datafile path: ", rcParams[
-            'logging.handlers.data_hdlr.filename'])
+        APPLOG.info("Updated logging directories, new datafile path: %s",
+                    rcParams['logging.handlers.data_hdlr.filename'])
     if args.mountdir:
         rcParams['usb.mount'] = args.mountdir
 
@@ -150,6 +149,7 @@ def timestamp_from_data(line) -> Union[float, None]:
         UNIX timestamp from data line, or None if conversion/formatting failed
 
     """
+    # TODO: Consider using regex for more accurate testing?
     fields = line.split(',')
     if len(fields) == 13:
         # Airborne RAW Data w/ GPS Week/GPS Second
@@ -182,7 +182,7 @@ def set_system_time(timestamp):
         output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
         return output
     else:
-        print("set_system_time not supported on this platform.")
+        APPLOG.info("set_system_time not supported on this platform.")
         return None
 
 

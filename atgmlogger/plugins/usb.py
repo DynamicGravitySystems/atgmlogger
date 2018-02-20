@@ -89,6 +89,12 @@ def _filehook(pattern):
 
 class RemovableStorageHandler(PluginInterface):
     options = ['mountpath', 'logdir', 'patterns']
+    consumerType = str
+    oneshot = True
+
+    @classmethod
+    def condition(cls):
+        return False
 
     def __init__(self):
         super().__init__()

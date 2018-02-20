@@ -22,7 +22,6 @@ def level_filter(level):
     return _filter
 
 
-@Dispatcher.register
 class DataLogger(PluginInterface):
     """
     DataLogger conforms to the PluginInterface spec but is not really
@@ -70,3 +69,34 @@ class DataLogger(PluginInterface):
         super().configure(**options)
         if 'loggername' in options:
             self._logger = logging.getLogger(options['loggername'])
+
+
+class SimpleLogger(PluginInterface):
+    options = ['timeout', 'logfile']
+
+    def __init__(self):
+        super().__init__()
+        self.logfile = 'gravdata.dat'
+        self.timeout = 0.2
+
+    def run(self):
+        try:
+            hdl = open(self.logfile, 'w+', encoding='utf-8', newline='\n')
+        except IOError:
+            APPLOG.exception("Erroor opening file for writing.")
+            return
+
+        while not self.exiting:
+            try:
+                line = self.get(block=True, timeout=self.timeout)
+            except queue.Empty:
+                continue
+            hdl.write(line + '\n')
+        hdl.close()
+
+    def configure(self, **options):
+        super().configure(**options)
+
+
+
+

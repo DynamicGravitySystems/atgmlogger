@@ -10,11 +10,9 @@ __all__ = ['install', 'uninstall']
 
 BASEPKG = __name__.split('.')[0]
 _log = logging.getLogger(__name__)
-_log.addHandler(logging.StreamHandler(sys.stderr))
 _log.setLevel(logging.WARNING)
 _file_map = {
     '.atgmlogger': '/etc/%s/.atgmlogger' % BASEPKG,
-    'logging.json': '/etc/%s/logging.json' % BASEPKG,
     'media-removable.mount': '/lib/systemd/system/media-removable.mount',
     '90-removable-storage.rules':
         '/etc/udev/rules.d/90-removable-storage.rules',
@@ -67,4 +65,4 @@ def install(verbose=True):
 def uninstall(verbose=True):
     if verbose:
         _log.setLevel(logging.DEBUG)
-    pass
+    raise NotImplementedError("Uninstall function not yet implemented.")

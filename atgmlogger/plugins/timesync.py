@@ -1,35 +1,48 @@
 # -*- coding: utf-8 -*-
 
-import queue
 from . import PluginInterface
+from .. import APPLOG
 from ..common import timestamp_from_data, set_system_time
+
+__plugin__ = 'TimeSync'
 
 
 class TimeSync(PluginInterface):
     options = ['interval']
     consumerType = str
+    oneshot = True
+    _tick = 0
+    interval = 1000
+
+    @classmethod
+    def condition(cls):
+        cls._tick += 1
+        return cls._tick % cls.interval == 0
 
     def __init__(self):
         super().__init__()
-        self._tick = 0
-        self.interval = 1000
 
     def run(self):
-        while not self.exiting:
-            self._tick += 1
-            try:
-                data = self.get(block=True, timeout=0.1)
-            except queue.Empty:
-                continue
-            if self._tick % self.interval == 0:
-                try:
-                    set_system_time(timestamp_from_data(data))
-                except:  # TODO: Be more specific
-                    raise
-            self.queue.task_done()
+        data = self.get(block=True, timeout=None)
+        try:
+            APPLOG.info("Trying to set system time.")
+            ts = timestamp_from_data(data)
+            if ts is not None:
+                set_system_time(ts)
+            else:
+                APPLOG.debug("Timestamp could not be extracted from data.")
+        except:  # TODO: Be more specific
+            raise
+        self.queue.task_done()
 
-    def configure(self, **options):
-        super().configure(**options)
-
-
-__plugin__ = TimeSync
+    @classmethod
+    def configure(cls, **options):
+        for key, value in options.items():
+            lkey = str(key).lower()
+            if lkey in cls.options:
+                if isinstance(cls.options, dict):
+                    dtype = cls.options[lkey]
+                    if not isinstance(value, dtype):
+                        print("Invalid option value provided for key: ", key)
+                        continue
+                setattr(cls, lkey, value)

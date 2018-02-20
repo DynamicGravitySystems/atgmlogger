@@ -5,7 +5,7 @@ import queue
 import threading
 from importlib import import_module
 
-__all__ = ['command', 'gpio', 'usb', 'PluginInterface']
+__all__ = ['gpio', 'usb', 'PluginInterface', 'load_plugin']
 
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
@@ -15,7 +15,7 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def __init__(self):
-        super().__init__()
+        super().__init__(name=self.__class__.__name__)
         self._exitSig = threading.Event()
         self._queue = queue.Queue()
         self._configured = False
@@ -24,7 +24,7 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     def run(self):
         pass
 
-    @abc.abstractmethod
+    # @abc.abstractmethod
     def configure(self, **options):
         for key, value in options.items():
             lkey = str(key).lower()
@@ -100,8 +100,10 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     except (ImportError, ModuleNotFoundError):
         raise
     klass = getattr(plugin, '__plugin__')
+    if isinstance(klass, str):
+        klass = getattr(plugin, klass)
     if klass is None:
-        print("Invalid plugin loaded.")
+        print("Invalid plugin specified: %s." % plugin)
         return
     if not issubclass(klass, PluginInterface):
         wrapper = type(name, (klass, PluginInterface), {})

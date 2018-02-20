@@ -61,8 +61,6 @@ class ComplexModule(PluginInterface):
                 continue
             self.count += 1
             self.accumulator.append(item.value * 10)
-            # if self.count < 10:
-            #     _log.debug("Put {} into accumulator".format(item))
             self.queue.task_done()
 
     def configure(self, **options):

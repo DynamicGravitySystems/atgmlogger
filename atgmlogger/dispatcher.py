@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 
+import os
 import logging
 import threading
 import queue
 from weakref import WeakSet
 
 _log = logging.getLogger()
+TIMEOUT = float(os.getenv("ATGM_TIMEOUT", '0.5'))
 
 """Premise: centralize and abstract the launching of threads and feeding of
 data to one location to allow for a modular/pluggable architecture.
@@ -71,17 +73,37 @@ class Dispatcher(threading.Thread):
 
     @classmethod
     def register(cls, klass, **params):
-        if klass not in cls._listeners:
+        if klass.consumerType is None:
+            raise ValueError("Plugin/Listener {} consumerType is not defined."
+                             .format(klass))
+        if klass not in cls._listeners and not klass.oneshot:
             _log.debug("Registering class in dispatcher: {}".format(klass))
             cls._listeners.add(klass)
+            cls._params[klass] = params
+        elif klass not in cls._oneshots and klass.oneshot:
+            _log.debug("Registering class as oneshot")
+            cls._oneshots.add(klass)
+            try:
+                klass.configure(**params)
+            except (AttributeError, TypeError):
+                pass
             cls._params[klass] = params
         return klass
 
     @classmethod
     def detach(cls, klass):
+        _log.debug("Attempting to detach %s", str(klass))
         if klass in cls._listeners:
             cls._listeners.remove(klass)
             del cls._params[klass]
+        elif klass in cls._oneshots:
+            cls._oneshots.remove(klass)
+
+    @classmethod
+    def detach_all(cls):
+        cls._listeners.clear()
+        cls._oneshots.clear()
+        cls._params = {}
 
     @classmethod
     def registered_listeners(cls):
@@ -101,11 +123,6 @@ class Dispatcher(threading.Thread):
         self._queue.put_nowait(item)
 
     def run(self):
-        # TODO: are there some threads that we could instantiate only when an
-        #  appropriate object has been received on the queue?
-        # Perhaps some that will destroy themselves after their task is
-        # complete and require new thread every time (infrequent events like
-        # USB copy job)
         for listener in self._listeners:
             try:
                 instance = listener()
@@ -119,12 +136,24 @@ class Dispatcher(threading.Thread):
 
         while not self.sigExit.is_set():
             try:
-                item = self._queue.get(block=True, timeout=.1)
+                item = self._queue.get(block=True, timeout=TIMEOUT)
             except queue.Empty:
                 continue
             for thread in self._threads:
+                if not thread.is_alive():
+                    continue
                 if isinstance(item, thread.consumerType):
                     thread.put(item)
+
+            for daemon in self._oneshots:
+                if hasattr(daemon, 'condition') and daemon.condition():
+                    print("Initializing daemon: {} condition is True"
+                          .format(daemon))
+                    oneshot = daemon()
+                    oneshot.configure(**self._params.get(daemon, {}))
+                    oneshot.start()
+                    oneshot.put(item)
+
             self._queue.task_done()
 
         for thread in self._threads:
@@ -139,8 +168,6 @@ class Dispatcher(threading.Thread):
 
     def get_instance(self, klass):
         for obj in self._threads:
-            _log.debug("Got obj: {}".format(obj))
             if isinstance(obj, klass):
-                _log.debug("Obj is instance of klass: {}".format(klass))
                 return obj
 
