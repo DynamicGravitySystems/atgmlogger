@@ -12,8 +12,10 @@ _APPLOG = logging.getLogger(__name__)
 try:
     import RPi.GPIO as gpio
     HAVE_GPIO = True
+    __plugin__ = 'GPIOListener'
 except (ImportError, RuntimeError):
     HAVE_GPIO = False
+    __plugin__ = None
 
 
 class GPIOListener(PluginInterface):
@@ -70,7 +72,3 @@ class GPIOListener(PluginInterface):
         gpio.cleanup()
 
 
-if HAVE_GPIO:
-    __plugin__ = GPIOListener
-else:
-    raise ImportError("GPIO Not available on this system.")

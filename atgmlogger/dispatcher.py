@@ -73,6 +73,7 @@ class Dispatcher(threading.Thread):
 
     @classmethod
     def register(cls, klass, **params):
+        assert klass is not None
         if klass.consumerType is None:
             raise ValueError("Plugin/Listener {} consumerType is not defined."
                              .format(klass))

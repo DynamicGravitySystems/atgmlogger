@@ -167,7 +167,7 @@ def run(*argv):
             try:
                 load_plugin(plugin, register=True, **plugins[plugin])
                 APPLOG.info("Loaded plugin: %s", plugin)
-            except (ImportError, ModuleNotFoundError):
+            except ImportError:  # ModuleNotFoundError implemented in 3.6
                 if args.verbose is not None and args.verbose > 2:
                     APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
                 else:
