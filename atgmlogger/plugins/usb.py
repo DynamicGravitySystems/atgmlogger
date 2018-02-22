@@ -94,7 +94,9 @@ class RemovableStorageHandler(PluginInterface):
 
     @classmethod
     def condition(cls):
-        return False
+        if not hasattr(cls, 'mountpath'):
+            return False
+        return os.path.ismount(cls.mountpath)
 
     def __init__(self):
         super().__init__()

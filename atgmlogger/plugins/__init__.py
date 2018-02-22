@@ -24,7 +24,6 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     def run(self):
         pass
 
-    # @abc.abstractmethod
     def configure(self, **options):
         for key, value in options.items():
             lkey = str(key).lower()
@@ -47,7 +46,16 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
             self._queue.put_nowait(item)
 
     def get(self, block=True, timeout=0.1):
-        # Raises queue.Empty if queue empty after timeout
+        """
+        Wrapper around internal Queue object.
+
+        Returns
+        -------
+        item : Any
+            Item from queue if available,
+            else raise queue.Empty
+
+        """
         return self._queue.get(block=block, timeout=timeout)
 
     @property
@@ -55,7 +63,7 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         return self._configured
 
     @property
-    def exiting(self):
+    def exiting(self) -> bool:
         return self._exitSig.is_set()
 
     @property
@@ -69,6 +77,10 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
 def load_plugin(name, path=None, register=True, **plugin_params):
     """
+    Load a runtime plugin from either the default module path
+    (atgmlogger.plugins), or from the specified path.
+    Optionally register the newly imported plugin with the dispatcher class,
+    passing specified keyword arguments 'plugin_params'
 
     Parameters
     ----------
@@ -99,20 +111,16 @@ def load_plugin(name, path=None, register=True, **plugin_params):
         plugin = import_module(".%s" % name, package=pkg_name)
     except ImportError:
         raise
+
     klass = getattr(plugin, '__plugin__')
     if isinstance(klass, str):
         klass = getattr(plugin, klass)
     if klass is None:
-        print("Invalid plugin specified: %s." % plugin)
-        return
+        raise ImportError("No __plugin__ specified in plugin module.")
     if not issubclass(klass, PluginInterface):
-        wrapper = type(name, (klass, PluginInterface), {})
-        if register:
-            from ..dispatcher import Dispatcher
-            Dispatcher.register(wrapper, **plugin_params)
-        return wrapper
-    else:
-        if register:
-            from ..dispatcher import Dispatcher
-            Dispatcher.register(klass, **plugin_params)
-        return klass
+        klass = type(name, (klass, PluginInterface), {})
+    if register:
+        from ..dispatcher import Dispatcher
+        Dispatcher.register(klass, **plugin_params)
+
+    return klass
