@@ -15,7 +15,7 @@ class TimeSync(PluginInterface):
     interval = 1000
 
     @classmethod
-    def condition(cls):
+    def condition(cls, line):
         cls._tick += 1
         return cls._tick % cls.interval == 0
 

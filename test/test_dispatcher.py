@@ -3,6 +3,7 @@
 import os
 import logging
 import threading
+from pathlib import Path
 
 import pytest
 from atgmlogger.plugins import PluginInterface, load_plugin
@@ -16,13 +17,14 @@ if len(root_log.handlers):
 Q_LEN = int(os.getenv('QUEUELENGTH', '5000'))
 LOG_LVL = os.getenv('LOGLVL', 'DEBUG')
 root_log.setLevel(LOG_LVL)
+BASE_PKG = 'atgmlogger'
 
 
 def test_dispatch(dispatcher):
     """Test basic dispatcher functionality - discretionary pushing of
     received Queue items based on their type to registered listeners."""
     assert not dispatcher.is_alive()
-    from .dispatch_modules import BasicModule, ComplexModule, SimplePacket
+    from ._mock_plugins import BasicModule, ComplexModule, SimplePacket
     dispatcher.register(BasicModule)
     dispatcher.register(ComplexModule)
     for klass in [BasicModule, ComplexModule]:
@@ -33,8 +35,8 @@ def test_dispatch(dispatcher):
         dispatcher.put(SimplePacket(i))
     dispatcher.exit(join=True)
 
-    bm = dispatcher.get_instance(BasicModule)
-    cm = dispatcher.get_instance(ComplexModule)
+    bm = dispatcher.get_instance_of(BasicModule)
+    cm = dispatcher.get_instance_of(ComplexModule)
     assert isinstance(bm, BasicModule)
     assert isinstance(cm, ComplexModule)
 
@@ -46,7 +48,7 @@ def test_dispatch(dispatcher):
 
 def test_dispatch_selective_load(dispatcher):
     assert not dispatcher.is_alive()
-    from .dispatch_modules import BasicModule, ComplexModule, SimplePacket
+    from ._mock_plugins import BasicModule, ComplexModule, SimplePacket
     dispatcher.register(BasicModule)
     dispatcher.register(ComplexModule)
     dispatcher.detach(ComplexModule)
@@ -55,8 +57,8 @@ def test_dispatch_selective_load(dispatcher):
         dispatcher.put(SimplePacket(i))
     dispatcher.exit(join=True)
 
-    bm = dispatcher.get_instance(BasicModule)
-    cm = dispatcher.get_instance(ComplexModule)
+    bm = dispatcher.get_instance_of(BasicModule)
+    cm = dispatcher.get_instance_of(ComplexModule)
     assert isinstance(bm, BasicModule)
     assert list(range(Q_LEN)) == bm.accumulator
 
@@ -64,8 +66,8 @@ def test_dispatch_selective_load(dispatcher):
 
 
 def test_load_plugin(dispatcher):
-    from . import plugins  # this is needed for some reason due to relative
-    # import
+    # this is needed for some reason due to relative import
+    from . import plugins
     plugin = load_plugin('basic_plugin', path="%s.plugins" % __package__,
                          register=True)
     assert plugin in dispatcher.registered_listeners()
@@ -102,3 +104,15 @@ def test_bad_plugin_path():
     with pytest.raises(ImportError):
         load_plugin('basic_plugin', path='atgmlogger')
 
+
+def test_oneshot_configure():
+    usb = load_plugin('usb', path='.'.join([BASE_PKG, 'plugins']))
+    opts = dict(mountpath="/media/removable",
+                logdir="/var/log/atgmlogger",
+                patterns=["*.dat", "*.log"])
+    usb.configure(**opts)
+
+    for key, val in opts.items():
+        if key == 'mountpath':
+            val = Path(val)
+        assert val == getattr(usb, key)

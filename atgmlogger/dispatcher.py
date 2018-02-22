@@ -6,6 +6,8 @@ import threading
 import queue
 from weakref import WeakSet
 
+from . import APPLOG
+
 _log = logging.getLogger()
 TIMEOUT = float(os.getenv("ATGM_TIMEOUT", '0.5'))
 
@@ -69,6 +71,7 @@ p1 = PluginWrapper()
 class Dispatcher(threading.Thread):
     _listeners = WeakSet()
     _oneshots = WeakSet()
+    _locks = {}
     _params = {}
 
     @classmethod
@@ -78,7 +81,7 @@ class Dispatcher(threading.Thread):
             raise ValueError("Plugin/Listener {} consumerType is not defined."
                              .format(klass))
         if klass not in cls._listeners and not klass.oneshot:
-            _log.debug("Registering class in dispatcher: {}".format(klass))
+            _log.debug("Registering class {} in dispatcher.".format(klass))
             cls._listeners.add(klass)
             cls._params[klass] = params
         elif klass not in cls._oneshots and klass.oneshot:
@@ -123,6 +126,9 @@ class Dispatcher(threading.Thread):
     def put(self, item):
         self._queue.put_nowait(item)
 
+    def _poll_oneshots(self, item):
+        pass
+
     def run(self):
         for listener in self._listeners:
             try:
@@ -139,26 +145,27 @@ class Dispatcher(threading.Thread):
             try:
                 item = self._queue.get(block=True, timeout=TIMEOUT)
             except queue.Empty:
-                continue
-            for thread in self._threads:
-                if not thread.is_alive():
-                    continue
-                if isinstance(item, thread.consumerType):
-                    thread.put(item)
-
-            for daemon in self._oneshots:
-                if hasattr(daemon, 'condition') and daemon.condition():
-                    print("Initializing daemon: {} condition is True"
-                          .format(daemon))
-                    oneshot = daemon()
-                    oneshot.configure(**self._params.get(daemon, {}))
-                    oneshot.start()
-                    oneshot.put(item)
-
-            self._queue.task_done()
+                item = None
+            else:
+                for thread in self._threads:
+                    if not thread.is_alive():
+                        continue
+                    if isinstance(item, thread.consumerType):
+                        thread.put(item)
+                self._queue.task_done()
+            finally:
+                # TODO: Acquire a lock per oneshot here in dispatcher instead
+                #  of having the oneshot class deal with it.
+                for oneshot in self._oneshots:
+                    if oneshot.condition(item):
+                        daemon = oneshot()
+                        daemon.start()
+                        daemon.put(item)
 
         for thread in self._threads:
+            APPLOG.debug("Exiting/Joining thread: <{}>".format(thread))
             thread.exit(join=True)
+        APPLOG.debug("All threads joined and exited.")
 
     def exit(self, join=False):
         if join:
@@ -167,7 +174,7 @@ class Dispatcher(threading.Thread):
             _log.debug("Queue joined, setting sigExit")
         self.sigExit.set()
 
-    def get_instance(self, klass):
+    def get_instance_of(self, klass):
         for obj in self._threads:
             if isinstance(obj, klass):
                 return obj

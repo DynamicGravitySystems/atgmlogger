@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+__plugin__ = 'TestPlugin'
+
 
 class TestPlugin:
     consumerType = str
@@ -20,6 +22,3 @@ class TestPlugin:
     @property
     def smtp(self):
         return self._smtp
-
-
-__plugin__ = TestPlugin

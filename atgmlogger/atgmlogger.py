@@ -187,5 +187,6 @@ def run(*argv):
         APPLOG.info("Keyboard Interrupt intercepted, initiating clean exit.")
         listener.exit()
         dispatcher.exit(join=True)
+        APPLOG.debug("Dispatcher exited.")
 
     return 0

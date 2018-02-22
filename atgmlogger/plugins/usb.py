@@ -9,11 +9,14 @@ import shutil
 import functools
 import threading
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List
 
 from atgmlogger import APPLOG
 from . import PluginInterface
+
+__plugin__ = 'RemovableStorageHandler'
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -49,7 +52,7 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
     if prefix:
         dir_name = prefix[:5]+dir_name
 
-    illegals = '\\:<>?*/\"'  # Illegal characters
+    illegals = '\\:<>?*/\"'  # Known illegal characters
     dir_name = "".join([c for c in dir_name if c not in illegals])
     return dir_name
 
@@ -64,6 +67,8 @@ def umount(path):
         result = 1
         APPLOG.exception("Error occurred attempting to un-mount device: {}"
                          .format(path))
+    else:
+        APPLOG.info("Successfully unmounted %s", str(path))
     return result
 
 
@@ -82,7 +87,8 @@ def _filehook(pattern):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             return func(self, *args, **kwargs)
-        wrapper.filehook = pattern
+        wrapper.filehook = re.compile(pattern)
+        # wrapper.filehook = pattern
         return wrapper
     return inner
 
@@ -91,63 +97,88 @@ class RemovableStorageHandler(PluginInterface):
     options = ['mountpath', 'logdir', 'patterns']
     consumerType = str
     oneshot = True
+    _runlock = False
+
+    mountpath = Path('/media/removable')
+    logdir = None
+    patterns = ['*.dat', '*.log']
 
     @classmethod
-    def condition(cls):
-        if not hasattr(cls, 'mountpath'):
-            return False
-        return os.path.ismount(cls.mountpath)
+    @contextmanager
+    def lock(cls):
+        if cls._runlock:
+            yield False
+        else:
+            cls._runlock = True
+            yield True
+            cls._runlock = False
+
+
+    @classmethod
+    def condition(cls, *args):
+        if not cls._runlock:
+            return os.path.ismount(cls.mountpath)
+        return False
 
     def __init__(self):
         super().__init__()
-
-        self.mountpath = Path('/media/removable')
-        self.log_dir = None
-        self.patterns = ['*.dat', '*.log']
 
         self._current_path = None
         self._last_copy_time = None
         self._umount_flag = threading.Event()
 
         self._run_hooks = list()
-        self._file_hooks = dict()
+        self._file_hooks = list()
         for member in self.__class__.__dict__.values():
             # Inspect for decorated methods
             if hasattr(member, 'runhook'):
                 self._run_hooks.append(self.__getattribute__(member.__name__))
             elif hasattr(member, 'filehook'):
-                self._file_hooks[member.filehook] = self.__getattribute__(
-                    member.__name__)
+                self._file_hooks.append((member.filehook,
+                                        self.__getattribute__(member.__name__)))
 
     def run(self):
-        if not self.configured:
-            raise ValueError("RemovableStorageHandler has not been configured.")
+        APPLOG.debug("Starting USB Handler thread")
         if not os.path.ismount(self.mountpath):
             APPLOG.error("{path} is not mounted or is not a valid mount point."
                          .format(path=self.mountpath))
-            return 1
+            return
 
-        for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
-            th = threading.Thread(target=functor)
-            th.start()
-            th.join()
+        # TODO: This will be taken over by dispatcher (the locking mechanism)
+        with self.lock() as locked:
+            if not locked:
+                return
 
-        try:
-            os.sync()
-        except AttributeError:
-            # os.sync is not available on Windows
-            pass
-        finally:
-            umount(self.mountpath)
+            for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
+                result = functor()
+                APPLOG.debug("USB Function {} returned: {}"
+                             .format(functor, result))
 
-    def configure(self, **options):
-        super().configure(**options)
+            try:
+                os.sync()
+            except AttributeError:
+                # os.sync is not available on Windows
+                pass
+            finally:
+                umount(self.mountpath)
+
+    @classmethod
+    def configure(cls, **options):
+        for key, value in options.items():
+            lkey = str(key).lower()
+            if lkey in cls.options:
+                if isinstance(cls.options, dict):
+                    dtype = cls.options[lkey]
+                    if not isinstance(value, dtype):
+                        print("Invalid option value provided for key: ", key)
+                        continue
+                setattr(cls, lkey, value)
         if 'mountpath' in options:
-            self.mountpath = Path(self.mountpath)
+            cls.mountpath = Path(options['mountpath'])
         if 'logdir' in options:
-            self.log_dir = Path(getattr(self, 'logdir'))
-            if not self.log_dir.is_dir():
-                self.log_dir = self.log_dir.parent
+            cls.log_dir = Path(options['logdir'])
+            if not cls.log_dir.is_dir():
+                cls.log_dir = cls.log_dir.parent
 
     @_runhook(priority=1)
     def copy_logs(self):
@@ -173,7 +204,7 @@ class RemovableStorageHandler(PluginInterface):
 
         if copy_size > get_free(self.mountpath):
             APPLOG.warning("Total size of datafiles to be copied is greater "
-                         "than free-space on device.")
+                           "than free-space on device.")
 
         dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
         dest_dir.mkdir()
@@ -199,15 +230,23 @@ class RemovableStorageHandler(PluginInterface):
         root_files = [file.name for file in self.mountpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)
-        for pattern in self._file_hooks.keys():
-            match = re.search(pattern, files)
+        print("Mount path root files: ", files)
+        for pattern, runner in self._file_hooks:
+            APPLOG.debug("Looking for pattern: %s", pattern.pattern)
+            match = pattern.search(files)
             if match:
-                self._file_hooks[pattern](self, match.group())
+                APPLOG.debug("Matched on pattern: %s", pattern.pattern)
+                runner(match.group())
+            else:
+                APPLOG.debug("No match on pattern: %s", pattern.pattern)
 
-    @_filehook('^clear(\.txt)?')
-    def clear_logs(self, pattern):
+    @_filehook(r'clear(\.txt)?')
+    def clear_logs(self, match):
         print("self is: ", self)
-        print("pattern is: ", pattern)
+        print("pattern is: ", match)
 
+    @_filehook(r'diag(nostic)?(\.txt)?')
+    def run_diag(self, match):
+        APPLOG.debug("Running system diagnostics and exporting result to: %s",
+                     self._current_path)
 
-__plugin__ = RemovableStorageHandler

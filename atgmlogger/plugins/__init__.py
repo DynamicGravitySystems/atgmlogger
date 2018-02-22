@@ -9,6 +9,7 @@ __all__ = ['gpio', 'usb', 'PluginInterface', 'load_plugin']
 
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
+    # TODO: Make a specialized subclass for OneShot Plugins?
     consumerType = None
     options = []
     oneshot = False  # or use a method i.e. is_oneshot() -> bool?
@@ -57,6 +58,9 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
         """
         return self._queue.get(block=block, timeout=timeout)
+
+    def condition(self, *args):
+        return False
 
     @property
     def configured(self) -> bool:

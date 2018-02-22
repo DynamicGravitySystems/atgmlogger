@@ -2,6 +2,8 @@
 
 from atgmlogger.plugins import PluginInterface
 
+__plugin__ = 'SubclassPlugin'
+
 
 class SubclassPlugin(PluginInterface):
     options = ['friendly_name', 'sleeptime']
@@ -14,6 +16,3 @@ class SubclassPlugin(PluginInterface):
 
     def configure(self, **options):
         super().configure(**options)
-
-
-__plugin__ = SubclassPlugin

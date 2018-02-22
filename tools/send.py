@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # coding: utf-8
-
+import functools
 import time
 import sys
 import logging
@@ -96,7 +96,7 @@ def send(handle, data: List, interval=1.0, count=None,
         handle.write(enc_line)
         if copy_output is not None:
             try:
-                copy_output(enc_line)
+                copy_output(line)
             except AttributeError:
                 pass
         SEND_COUNT += 1
@@ -107,14 +107,25 @@ def send(handle, data: List, interval=1.0, count=None,
     return SEND_COUNT
 
 
+def _write_tee(fd, data):
+    try:
+        fd.write(data)
+    except IOError:
+        print("Error writing line.")
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog="send", description="Send arbitrary data over a serial port")
     parser.add_argument('-d', '--device', type=str, default=None)
     parser.add_argument('-c', '--count', type=int, default=None)
+    parser.add_argument('--period', type=int, default=None,
+                        help="Send data for a specified period (seconds)")
     parser.add_argument('-r', '--repeat', action='store_true')
     parser.add_argument('-i', '--interval', type=float, default=1.0)
     parser.add_argument('-f', '--file', required=True)
+    parser.add_argument('-t', '--tee', type=str, default=None,
+                        help="Specify file to copy transmitted data to.")
 
     opts = parser.parse_args(sys.argv[1:])
 
@@ -133,18 +144,33 @@ if __name__ == '__main__':
         _log.error("Input file contains no data.")
         sys.exit(1)
 
+    tee = None
+    copy = lambda x: None
+    if opts.tee is not None:
+        try:
+            tee = open(opts.tee, 'w', buffering=1)
+            copy = functools.partial(_write_tee, tee)
+        except IOError:
+            pass
+
     _log.info("Starting send with params:\n"
               "Device: %s\tRepeat: %s\tInterval: %.2f\n",
               opts.device, str(opts.repeat), opts.interval)
     print("Sending:")
     try:
         res = send(hdl, data=contents, interval=opts.interval,
-                   count=opts.count, repeat=opts.repeat)
+                   count=opts.count, repeat=opts.repeat, copy_output=copy)
     except KeyboardInterrupt:
         _log.info("Keyboard Interrupt Intercepted\n"
                   "# Lines Sent: %d", SEND_COUNT)
+        if tee is not None:
+            tee.flush()
+            tee.close()
         sys.exit(1)
     else:
         _log.info("Send completed.\n"
                   "# Lines Sent: %d", SEND_COUNT)
+        if tee is not None:
+            tee.flush()
+            tee.close()
         sys.exit(0)

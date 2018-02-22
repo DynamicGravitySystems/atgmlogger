@@ -31,7 +31,7 @@ def join_threads(threads, timeout=0.1):
 
 
 def test_atgmlogger_dispatcher(handle, dispatcher):
-    from .dispatch_modules import LoggerAdapter
+    from ._mock_plugins import LoggerAdapter
     dispatcher.register(LoggerAdapter)
     listener = atgmlogger.SerialListener(handle, dispatcher.message_queue)
     dispatcher.start()
@@ -52,7 +52,7 @@ def test_atgmlogger_dispatcher(handle, dispatcher):
     dispatcher.exit(join=True)
     listener.exit()
 
-    data_logger = dispatcher.get_instance(LoggerAdapter)
+    data_logger = dispatcher.get_instance_of(LoggerAdapter)
     assert expected == data_logger.data()
 
 

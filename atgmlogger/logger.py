@@ -63,7 +63,7 @@ class DataLogger(PluginInterface):
                 # In case of multiprocessing.Queue
                 pass
 
-        APPLOG.debug("Exiting DataLogger thread.")
+        APPLOG.debug("Exited DataLogger thread.")
 
     def configure(self, **options):
         super().configure(**options)
