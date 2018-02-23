@@ -22,12 +22,14 @@ class SimplePacket:
 
 @Dispatcher.register
 class BasicModule(PluginInterface):
-    consumerType = SimplePacket
-
     def __init__(self):
         super().__init__()
         self._exitSig = threading.Event()
         self.accumulator = []
+
+    @staticmethod
+    def consumes(item):
+        return isinstance(item, SimplePacket)
 
     def run(self):
         while not self.exiting:
@@ -35,7 +37,7 @@ class BasicModule(PluginInterface):
                 item = self.queue.get(block=True, timeout=0.1)
             except queue.Empty:
                 continue
-            assert isinstance(item, self.consumerType)
+            assert self.consumes(item)
             self.accumulator.append(item.value)
             self.queue.task_done()
 
@@ -45,13 +47,15 @@ class BasicModule(PluginInterface):
 
 @Dispatcher.register
 class ComplexModule(PluginInterface):
-    consumerType = SimplePacket
-
     def __init__(self):
         super().__init__()
         self._exitSig = threading.Event()
         self.accumulator = []
         self.count = 0
+
+    @staticmethod
+    def consumes(item):
+        return isinstance(item, SimplePacket)
 
     def run(self):
         while not self.exiting:

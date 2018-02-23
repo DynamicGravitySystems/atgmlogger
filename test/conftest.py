@@ -58,3 +58,11 @@ def dispatcher():
 @pytest.fixture(params=["/var/log/", Path("/var/log")])
 def logpath(request):
     return request.param
+
+
+@pytest.fixture
+def mountpoint(tmpdir):
+    path = tmpdir.mkdir('mount')
+    return Path(path)
+
+

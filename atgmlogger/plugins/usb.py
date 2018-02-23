@@ -5,9 +5,9 @@ import re
 import sys
 import time
 import uuid
+import shlex
 import shutil
 import functools
-import threading
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +17,7 @@ from atgmlogger import APPLOG
 from . import PluginInterface
 
 __plugin__ = 'RemovableStorageHandler'
+CHECK_PLATFORM = True
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -58,7 +59,7 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
 
 
 def umount(path):
-    if sys.platform == 'win32':
+    if CHECK_PLATFORM and not sys.platform.startswith('linux'):
         APPLOG.warning("umount not supported on Windows Platform")
         return -1
     try:
@@ -95,7 +96,6 @@ def _filehook(pattern):
 
 class RemovableStorageHandler(PluginInterface):
     options = ['mountpath', 'logdir', 'patterns']
-    consumerType = str
     oneshot = True
     _runlock = False
 
@@ -113,19 +113,21 @@ class RemovableStorageHandler(PluginInterface):
             yield True
             cls._runlock = False
 
-
     @classmethod
     def condition(cls, *args):
         if not cls._runlock:
-            return os.path.ismount(cls.mountpath)
+            return os.path.ismount(str(cls.mountpath))
         return False
+
+    @classmethod
+    def consumes(cls, item):
+        return isinstance(item, str)
 
     def __init__(self):
         super().__init__()
 
         self._current_path = None
         self._last_copy_time = None
-        self._umount_flag = threading.Event()
 
         self._run_hooks = list()
         self._file_hooks = list()
@@ -167,11 +169,6 @@ class RemovableStorageHandler(PluginInterface):
         for key, value in options.items():
             lkey = str(key).lower()
             if lkey in cls.options:
-                if isinstance(cls.options, dict):
-                    dtype = cls.options[lkey]
-                    if not isinstance(value, dtype):
-                        print("Invalid option value provided for key: ", key)
-                        continue
                 setattr(cls, lkey, value)
         if 'mountpath' in options:
             cls.mountpath = Path(options['mountpath'])
@@ -225,28 +222,65 @@ class RemovableStorageHandler(PluginInterface):
         self._last_copy_time = time.time()
 
     @_runhook(priority=2)
-    def watch_files(self):
+    def watch_files(self, run=True):
         APPLOG.debug("Processing watch_files")
         root_files = [file.name for file in self.mountpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)
-        print("Mount path root files: ", files)
+        APPLOG.debug("Mount path root files: %s", files)
+        matched = []
         for pattern, runner in self._file_hooks:
             APPLOG.debug("Looking for pattern: %s", pattern.pattern)
             match = pattern.search(files)
             if match:
+                matched.append(match.group())
                 APPLOG.debug("Matched on pattern: %s", pattern.pattern)
-                runner(match.group())
+                if run:
+                    path = self.mountpath.joinpath(match.group())
+                    runner(path)
             else:
                 APPLOG.debug("No match on pattern: %s", pattern.pattern)
+        return matched
 
     @_filehook(r'clear(\.txt)?')
-    def clear_logs(self, match):
-        print("self is: ", self)
-        print("pattern is: ", match)
+    def clear_logs(self, path: Path):
+        APPLOG.info("Clearing old application logs and gravity data files.")
+        with path.open('r') as fd:
+            contents = fd.read()
+            if contents.startswith('archive'):
+                APPLOG.info("Rotating and archiving logs.")
+                self.context.logrotate()
+
+        try:
+            os.remove(str(path.resolve()))
+        except OSError:
+            pass
 
     @_filehook(r'diag(nostic)?(\.txt)?')
     def run_diag(self, match):
         APPLOG.debug("Running system diagnostics and exporting result to: %s",
-                     self._current_path)
+                     match)
+        if CHECK_PLATFORM and not sys.platform.startswith('linux'):
+            APPLOG.debug("Current platform does not support diagnostics "
+                         "runner.")
+            return
+
+        commands = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
+        result = 'Diagnostic Results ({dt}):\n\n'.format(dt='TodayPlaceholder')
+        for cmd in commands:
+            result += 'Command: %s\n' % cmd
+            try:
+                output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
+            except (subprocess.SubprocessError, FileNotFoundError):
+                APPLOG.exception("Exception executing diagnostic command: "
+                                 "%s", cmd)
+                output = "Command Failed, see applog for exception details."
+            result += output + '\n\n'
+
+        with match.open('w+') as fd:
+            fd.write(result)
+
+
+
+
 

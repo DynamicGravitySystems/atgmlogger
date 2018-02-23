@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 
-import os
 import logging
 import threading
 import queue
 from weakref import WeakSet
 
-from . import APPLOG
+from . import APPLOG, TIMEOUT
+from .common import Blink, Command
 
 _log = logging.getLogger()
-TIMEOUT = float(os.getenv("ATGM_TIMEOUT", '0.5'))
 
 """Premise: centralize and abstract the launching of threads and feeding of
 data to one location to allow for a modular/pluggable architecture.
@@ -77,9 +76,6 @@ class Dispatcher(threading.Thread):
     @classmethod
     def register(cls, klass, **params):
         assert klass is not None
-        if klass.consumerType is None:
-            raise ValueError("Plugin/Listener {} consumerType is not defined."
-                             .format(klass))
         if klass not in cls._listeners and not klass.oneshot:
             _log.debug("Registering class {} in dispatcher.".format(klass))
             cls._listeners.add(klass)
@@ -117,7 +113,8 @@ class Dispatcher(threading.Thread):
         super().__init__(name=self.__class__.__name__)
         self.sigExit = sigExit or threading.Event()
         self._queue = queue.Queue()
-        self._threads = []
+        self._threads = WeakSet()
+        self._active_oneshots = WeakSet()
 
     @property
     def message_queue(self):
@@ -130,16 +127,18 @@ class Dispatcher(threading.Thread):
         pass
 
     def run(self):
+        context = AppContext(self._queue)
         for listener in self._listeners:
             try:
                 instance = listener()
+                instance.set_context(context)
                 instance.configure(**self._params[listener])
             except TypeError:
                 _log.exception("Error instantiating listener.")
                 continue
             else:
                 instance.start()
-                self._threads.append(instance)
+                self._threads.add(instance)
 
         while not self.sigExit.is_set():
             try:
@@ -150,12 +149,18 @@ class Dispatcher(threading.Thread):
                 for thread in self._threads:
                     if not thread.is_alive():
                         continue
-                    if isinstance(item, thread.consumerType):
+                    if thread.consumes(item):
                         thread.put(item)
+                    # if isinstance(item, thread.consumerType):
+                    #     thread.put(item)
                 self._queue.task_done()
             finally:
                 # TODO: Acquire a lock per oneshot here in dispatcher instead
                 #  of having the oneshot class deal with it.
+                # TODO: How to deal with inter-thread communication - e.g.
+                # the usb plugin needs to communicate/signal GPIO somehow to
+                # blink that it is busy. Likewise we may need a way to tell
+                # the logging thread to rotate the logs.
                 for oneshot in self._oneshots:
                     if oneshot.condition(item):
                         daemon = oneshot()
@@ -178,4 +183,18 @@ class Dispatcher(threading.Thread):
         for obj in self._threads:
             if isinstance(obj, klass):
                 return obj
+
+
+class AppContext:
+    def __init__(self, listener_queue):
+        self._queue = listener_queue
+
+    def blink(self, led='data', freq=0.1):
+        cmd = Blink(led=led, frequency=freq)
+        self._queue.put_nowait(cmd)
+
+    def logrotate(self):
+        cmd = Command('logrotate')
+        self._queue.put_nowait(cmd)
+
 

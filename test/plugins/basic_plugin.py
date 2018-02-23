@@ -4,13 +4,14 @@ __plugin__ = 'TestPlugin'
 
 
 class TestPlugin:
-    consumerType = str
-
     # Important Note, if plugins utilize a __init__ they must make a call to
     # super().__init__()
     def __init__(self):
         super().__init__()
         self._smtp = None
+
+    def consumes(self, item):
+        return isinstance(item, str)
 
     def run(self):
         pass

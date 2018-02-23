@@ -19,7 +19,6 @@ except (ImportError, RuntimeError):
 
 
 class GPIOListener(PluginInterface):
-    consumerType = Blink
     options = ['mode', 'data_pin', 'usb_pin']
 
     def __init__(self):
@@ -31,6 +30,10 @@ class GPIOListener(PluginInterface):
         self.modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
         self.data_pin = 11
         self.usb_pin = 13
+
+    @staticmethod
+    def consumes(item):
+        return isinstance(item, Blink)
 
     def configure(self, **options):
         _APPLOG.debug("Configuring GPIO with options: {}".format(options))

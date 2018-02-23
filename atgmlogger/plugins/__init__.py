@@ -10,20 +10,34 @@ __all__ = ['gpio', 'usb', 'PluginInterface', 'load_plugin']
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     # TODO: Make a specialized subclass for OneShot Plugins?
-    consumerType = None
     options = []
     oneshot = False  # or use a method i.e. is_oneshot() -> bool?
 
-    @abc.abstractmethod
     def __init__(self):
         super().__init__(name=self.__class__.__name__)
         self._exitSig = threading.Event()
         self._queue = queue.Queue()
         self._configured = False
+        self._context = None
+
+    @staticmethod
+    @abc.abstractmethod
+    def consumes(item) -> bool:
+        return False
+
+    def condition(self, *args):
+        return False
 
     @abc.abstractmethod
     def run(self):
         pass
+
+    def set_context(self, context):
+        self._context = context
+
+    @property
+    def context(self):
+        return self._context
 
     def configure(self, **options):
         for key, value in options.items():
@@ -43,10 +57,9 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         self._exitSig.set()
 
     def put(self, item):
-        if isinstance(item, self.consumerType):
-            self._queue.put_nowait(item)
+        self._queue.put_nowait(item)
 
-    def get(self, block=True, timeout=0.1):
+    def get(self, block=True, timeout=None):
         """
         Wrapper around internal Queue object.
 
@@ -58,9 +71,6 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
         """
         return self._queue.get(block=block, timeout=timeout)
-
-    def condition(self, *args):
-        return False
 
     @property
     def configured(self) -> bool:

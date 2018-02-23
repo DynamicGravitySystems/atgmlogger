@@ -9,7 +9,6 @@ __plugin__ = 'TimeSync'
 
 class TimeSync(PluginInterface):
     options = ['interval']
-    consumerType = str
     oneshot = True
     _tick = 0
     interval = 1000
@@ -34,6 +33,10 @@ class TimeSync(PluginInterface):
         except:  # TODO: Be more specific
             raise
         self.queue.task_done()
+
+    @staticmethod
+    def consumes(item) -> bool:
+        return isinstance(item, str)
 
     @classmethod
     def configure(cls, **options):

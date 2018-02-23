@@ -14,7 +14,7 @@ from atgmlogger import APPLOG, __description__, __version__, VERBOSITY_MAP
 from atgmlogger import rcParams
 
 __all__ = ['parse_args', 'decode', 'convert_gps_time', 'timestamp_from_data',
-           'set_system_time', 'Blink']
+           'set_system_time', 'Blink', 'Command']
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
 
@@ -194,4 +194,10 @@ class Blink:
 
     def __lt__(self, other):
         return self.priority < other.priority
+
+
+class Command:
+    def __init__(self, cmd, **params):
+        self.cmd = cmd
+        self.params = params
 

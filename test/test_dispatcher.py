@@ -104,15 +104,3 @@ def test_bad_plugin_path():
     with pytest.raises(ImportError):
         load_plugin('basic_plugin', path='atgmlogger')
 
-
-def test_oneshot_configure():
-    usb = load_plugin('usb', path='.'.join([BASE_PKG, 'plugins']))
-    opts = dict(mountpath="/media/removable",
-                logdir="/var/log/atgmlogger",
-                patterns=["*.dat", "*.log"])
-    usb.configure(**opts)
-
-    for key, val in opts.items():
-        if key == 'mountpath':
-            val = Path(val)
-        assert val == getattr(usb, key)
