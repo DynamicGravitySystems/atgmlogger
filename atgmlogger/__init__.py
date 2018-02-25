@@ -102,7 +102,7 @@ class _ConfigParams:
         for part in path:
             base = base.setdefault(part, {})
         base[last] = value
-        print("Set {} to {}".format(last, value))
+        # print("Set {} to {}".format(last, value))
 
 
 rcParams = _ConfigParams()

@@ -24,7 +24,7 @@ def rcParams():
 
 @pytest.fixture()
 def handle():
-    hdl = serial.serial_for_url('loop://', baudrate=57600, timeout=0.1)
+    hdl = serial.serial_for_url('loop://', baudrate=57600, timeout=None)
     yield hdl
     hdl.close()
 

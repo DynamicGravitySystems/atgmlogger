@@ -3,29 +3,17 @@
 import os
 import sys
 import copy
-import threading
 import datetime
 import logging
-import time
-import queue
-import multiprocessing as mp
 from pathlib import Path
 import pytest
 
 from atgmlogger import atgmlogger, common, _ConfigParams
-from atgmlogger.logger import DataLogger
 from atgmlogger.plugins import load_plugin
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 _log.addHandler(logging.StreamHandler(stream=sys.stderr))
-
-SLEEPTIME = float(os.getenv('SLEEPTIME', .5))
-
-
-def join_threads(threads, timeout=0.1):
-    for thread in threads:
-        thread.join(timeout=timeout)
 
 
 def test_atgmlogger_plugins(rcParams):

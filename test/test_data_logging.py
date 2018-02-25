@@ -41,7 +41,7 @@ def test_simple_logger(tmpdir):
 
 
 def test_logger_rotate(tmpdir):
-    test_dir = Path(tmpdir.mkdir('logs'))
+    test_dir = Path(str(tmpdir.mkdir('logs')))
     log_file = test_dir.joinpath('gravdata.dat')
 
     logger = SimpleLogger()
