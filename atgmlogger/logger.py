@@ -1,13 +1,12 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
 import io
-import queue
 import logging
 import datetime
 import threading
 from pathlib import Path
 
-from atgmlogger import APPLOG, TIMEOUT
+from atgmlogger import APPLOG
 from .plugins import PluginInterface
 from .common import Command
 
@@ -37,17 +36,10 @@ class DataLogger(PluginInterface):
     a python logging logger - typically to a file as defined in the program
     configuration (see rcParams).
     """
-    options = ['timeout', 'loggername', 'datalvl']
+    options = ['loggername', 'datalvl']
 
-    def __init__(self, data_queue=None, logger=None, exit_sig=None):
+    def __init__(self, logger=None):
         super().__init__()
-
-        # For compatibility - TODO: Determine if these should be kept
-        if data_queue is not None:
-            self.queue = data_queue
-        if exit_sig is not None:
-            self._exitSig = exit_sig
-
         self._logger = logger or logging.getLogger(__name__)
 
     def consumes(self, item):
@@ -55,26 +47,23 @@ class DataLogger(PluginInterface):
 
     def logrotate(self):
         APPLOG.debug("Doing logrotate")
-        pass
+        raise NotImplementedError("Logrotate not yet implemented")
 
     def run(self):
         while not self.exiting:
             try:
-                item = self.get(block=True, timeout=TIMEOUT)
+                item = self.get(block=True, timeout=None)
+                if item is None:
+                    self.task_done()
+                    continue
                 if isinstance(item, Command) and item.cmd == 'rotate':
                     self.logrotate()
                 else:
                     self._logger.log(DATA_LVL, item)
-            except queue.Empty:
-                continue
             except FileNotFoundError:
                 APPLOG.error("Log handler file path not found, data will not "
                              "be saved.")
-            try:
-                self.queue.task_done()
-            except AttributeError:
-                # In case of multiprocessing.Queue
-                pass
+            self.task_done()
 
         APPLOG.debug("Exited DataLogger thread.")
 
@@ -86,7 +75,7 @@ class DataLogger(PluginInterface):
 
 # TODO: this will be renamed
 class SimpleLogger(PluginInterface):
-    options = ['timeout', 'logfile']
+    options = ['logfile']
 
     def __init__(self):
         super().__init__()
@@ -103,7 +92,6 @@ class SimpleLogger(PluginInterface):
     def logrotate(self):
         with self._lock:
             APPLOG.debug("Performing logrotate")
-            print("rotating")
             if self._hdl is None:
                 return
 
@@ -113,11 +101,11 @@ class SimpleLogger(PluginInterface):
             except IOError:
                 APPLOG.exception()
                 return
-            print("Closed handle")
             suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M')
             base = self.logfile.parent.resolve()
             target = base.joinpath('{name}.{suffix}'
-                                   .format(name=self.logfile.name, suffix=suffix))
+                                   .format(name=self.logfile.name,
+                                           suffix=suffix))
             self.logfile.rename(target)
             self._hdl = self.logfile.open(**self._params)
 
@@ -130,14 +118,15 @@ class SimpleLogger(PluginInterface):
 
         while not self.exiting:
             try:
-                item = self.get(block=True, timeout=TIMEOUT)
+                item = self.get(block=True, timeout=None)
+                if item is None:
+                    self.queue.task_done()
+                    continue
                 if isinstance(item, Command) and item.cmd == 'rotate':
                     self.logrotate()
                 else:
                     self._hdl.write(item + '\n')
                     self.queue.task_done()
-            except queue.Empty:
-                continue
             except IOError:
                 APPLOG.exception()
                 continue
@@ -145,7 +134,3 @@ class SimpleLogger(PluginInterface):
 
     def configure(self, **options):
         super().configure(**options)
-
-
-
-

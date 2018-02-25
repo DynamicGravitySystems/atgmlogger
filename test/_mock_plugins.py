@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 
-# PyTest utility module containing Dispatch test modules
+# PyTest utility module containing Dispatch test modules for atgmlogger
 import logging
 import threading
-import queue
 
 from atgmlogger.plugins import PluginInterface
 from atgmlogger.dispatcher import Dispatcher
@@ -33,13 +32,13 @@ class BasicModule(PluginInterface):
 
     def run(self):
         while not self.exiting:
-            try:
-                item = self.queue.get(block=True, timeout=0.1)
-            except queue.Empty:
+            item = self.queue.get(block=True, timeout=None)
+            if item is None:
+                self.task_done()
                 continue
             assert self.consumes(item)
             self.accumulator.append(item.value)
-            self.queue.task_done()
+            self.task_done()
 
     def configure(self, **options):
         pass
@@ -59,16 +58,41 @@ class ComplexModule(PluginInterface):
 
     def run(self):
         while not self.exiting:
-            try:
-                item = self.queue.get(block=True, timeout=0.1)
-            except queue.Empty:
+            item = self.queue.get(block=True, timeout=None)
+            if item is None:
+                self.task_done()
                 continue
             self.count += 1
             self.accumulator.append(item.value * 10)
-            self.queue.task_done()
+            self.task_done()
 
     def configure(self, **options):
         pass
+
+
+class SimpleOneshot(PluginInterface):
+    oneshot = True
+
+    def __init__(self):
+        super().__init__()
+        self.data = []
+
+    @staticmethod
+    def consumes(item) -> bool:
+        return isinstance(item, str)
+
+    def run(self):
+        while not self.exiting:
+            item = self.get()
+            if item is None:
+                self.task_done()
+                continue
+            self.data.append(item)
+            self.task_done()
+
+    @classmethod
+    def condition(cls, item):
+        return True
 
 
 class TestLogger:

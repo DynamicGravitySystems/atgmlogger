@@ -10,8 +10,6 @@ import time
 import queue
 import multiprocessing as mp
 from pathlib import Path
-from pprint import pprint
-
 import pytest
 
 from atgmlogger import atgmlogger, common, _ConfigParams
@@ -30,33 +28,6 @@ def join_threads(threads, timeout=0.1):
         thread.join(timeout=timeout)
 
 
-def test_atgmlogger_dispatcher(handle, dispatcher):
-    from ._mock_plugins import LoggerAdapter
-    dispatcher.register(LoggerAdapter)
-    listener = atgmlogger.SerialListener(handle, dispatcher.message_queue)
-    dispatcher.start()
-
-    # Put listener in a Thread for testing control
-    listener_th = threading.Thread(target=listener.listen, name='test_listener')
-    listener_th.start()
-
-    expected = []
-    for i in range(10):
-        utf = "Line: {}".format(i)
-        expected.append((75, utf))
-        raw = (utf + "\n").encode('latin-1')
-        handle.write(raw)
-
-    time.sleep(.2)
-
-    dispatcher.exit(join=True)
-    listener.exit()
-
-    data_logger = dispatcher.get_instance_of(LoggerAdapter)
-    assert expected == data_logger.data()
-
-
-# @pytest.mark.skip
 def test_atgmlogger_plugins(rcParams):
     # This is causing errors in the test_dispatcher suite, maybe the
     # registration happening twice?
@@ -69,69 +40,6 @@ def test_atgmlogger_plugins(rcParams):
             load_plugin(plugin, register=False)
         except ImportError:
             pass
-
-
-def test_at1logger(handle, logger, sigExit):
-    """Tests the old way of running atgmlogger before dispatcher"""
-    data_queue = queue.Queue()
-    atgm = atgmlogger.SerialListener(handle,
-                                     collector=data_queue)
-    listen_th = threading.Thread(target=atgm.listen, name='listener')
-
-    writer = DataLogger(data_queue, logger=logger, exit_sig=sigExit)
-
-    threads = [listen_th, writer]
-    for thread in threads:
-        thread.start()
-
-    in_list = list()
-    for i in range(0, 1001):
-        decoded = "Line: {}".format(i)
-        data = "Line: {}\n".format(i).encode('latin-1')
-        in_list.append(decoded)
-        handle.write(data)
-
-    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
-    time.sleep(SLEEPTIME)
-    sigExit.set()
-    atgm.exit()
-    join_threads(threads)
-
-    assert in_list == logger.accumulator
-
-
-def test_mproc_queue(handle, logger, sigExit):
-    # Test use of multiprocessing.Queue with listener and DataLogger
-    data_queue = mp.Queue()
-    atgm = atgmlogger.SerialListener(handle, collector=data_queue)
-    listener = threading.Thread(target=atgm.listen, name='listener')
-    writer = DataLogger(data_queue, logger=logger, exit_sig=sigExit)
-
-    threads = [listener, writer]
-    for thread in threads:
-        thread.start()
-
-    in_list = list()
-    for i in range(0, 1001):
-        decoded = "Line: {}".format(i)
-        raw = "Line: {}\n".format(i).encode('latin-1')
-        in_list.append(decoded)
-        handle.write(raw)
-
-    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
-    time.sleep(SLEEPTIME)
-    sigExit.set()
-    atgm.exit()
-    join_threads(threads)
-
-    # assert in_list == writer._internal_copy
-    assert in_list == logger.accumulator
-
-
-# def test_gpio_failure(sigExit):
-#     with pytest.raises(RuntimeError):
-#         gpio_pl = gpio.GPIOListener()
-#         gpio_pl.start()
 
 
 def test_decode():
@@ -244,9 +152,8 @@ def test_config_default(cfg_dict):
     assert cfg.get_default('logging.version') == 1
 
 
-@pytest.mark.skip("Fix path expansion check.")
 def test_configparams_search(cfg_dict):
-    cfg = _ConfigParams(path='test/.atgmlogger')
+    cfg = _ConfigParams(path='atgmlogger/install/.atgmlogger')
 
     assert cfg.config == cfg_dict
 

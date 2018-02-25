@@ -1,14 +1,12 @@
 # -*- coding: utf-8 -*-
 
-import logging
 import threading
 import queue
 from weakref import WeakSet
 
-from . import APPLOG, TIMEOUT
+from . import APPLOG
 from .common import Blink, Command
 
-_log = logging.getLogger()
 
 """Premise: centralize and abstract the launching of threads and feeding of
 data to one location to allow for a modular/pluggable architecture.
@@ -45,11 +43,6 @@ So the general concept:
 Main loads config -> for plugin in config try to load plugin module -> 
 register the plugin class with dispatcher -> start dispatcher.
 
-Another though: attempt to register plugin class with ModuleInterface ABC to 
-verify that it conforms to the spec, without requiring the plugins to 
-directly subclass ModuleInterface
-^ This doesn't work as ABC.register doesn't check to verify interface 
-implementation.
 What I might be able to do is dynamically create a Wrapper which subclasses 
 the plugin AND ModuleInterface - this will then raise a TypeError on 
 instantiation if the plugin class does not implement the abstract methods.
@@ -69,30 +62,33 @@ p1 = PluginWrapper()
 
 class Dispatcher(threading.Thread):
     _listeners = WeakSet()
-    _oneshots = WeakSet()
+    _oneshots = set()
     _locks = {}
     _params = {}
+    _runlock = threading.Lock()
 
     @classmethod
     def register(cls, klass, **params):
+        cls.acquire_lock()
         assert klass is not None
         if klass not in cls._listeners and not klass.oneshot:
-            _log.debug("Registering class {} in dispatcher.".format(klass))
+            APPLOG.debug("Registering class {} in dispatcher.".format(klass))
             cls._listeners.add(klass)
             cls._params[klass] = params
         elif klass not in cls._oneshots and klass.oneshot:
-            _log.debug("Registering class as oneshot")
+            APPLOG.debug("Registering class as oneshot")
             cls._oneshots.add(klass)
             try:
                 klass.configure(**params)
             except (AttributeError, TypeError):
                 pass
             cls._params[klass] = params
+        cls.release_lock()
         return klass
 
     @classmethod
     def detach(cls, klass):
-        _log.debug("Attempting to detach %s", str(klass))
+        APPLOG.debug("Attempting to detach %s", str(klass))
         if klass in cls._listeners:
             cls._listeners.remove(klass)
             del cls._params[klass]
@@ -106,15 +102,26 @@ class Dispatcher(threading.Thread):
         cls._params = {}
 
     @classmethod
-    def registered_listeners(cls):
-        return cls._listeners
+    def acquire_lock(cls, blocking=True):
+        APPLOG.debug("%s acquired runlock", cls)
+        return cls._runlock.acquire(blocking=blocking)
+
+    @classmethod
+    def release_lock(cls):
+        APPLOG.debug("%s releasing runlock", cls)
+        cls._runlock.release()
 
     def __init__(self, sigExit=None):
         super().__init__(name=self.__class__.__name__)
         self.sigExit = sigExit or threading.Event()
         self._queue = queue.Queue()
-        self._threads = WeakSet()
+        # self._threads = WeakSet()
+        self._threads = set()
         self._active_oneshots = WeakSet()
+
+    @classmethod
+    def __contains__(cls, item):
+        return item in cls._listeners or item in cls._oneshots
 
     @property
     def message_queue(self):
@@ -123,61 +130,60 @@ class Dispatcher(threading.Thread):
     def put(self, item):
         self._queue.put_nowait(item)
 
-    def _poll_oneshots(self, item):
-        pass
-
     def run(self):
+        lock = self.acquire_lock(blocking=True)
+        APPLOG.debug("Dispatcher run acquired runlock")
         context = AppContext(self._queue)
+        daemons = WeakSet()
         for listener in self._listeners:
             try:
                 instance = listener()
                 instance.set_context(context)
                 instance.configure(**self._params[listener])
             except TypeError:
-                _log.exception("Error instantiating listener.")
+                APPLOG.exception("Error instantiating listener.")
                 continue
             else:
                 instance.start()
                 self._threads.add(instance)
 
         while not self.sigExit.is_set():
-            try:
-                item = self._queue.get(block=True, timeout=TIMEOUT)
-            except queue.Empty:
-                item = None
-            else:
-                for thread in self._threads:
-                    if not thread.is_alive():
-                        continue
-                    if thread.consumes(item):
-                        thread.put(item)
-                    # if isinstance(item, thread.consumerType):
-                    #     thread.put(item)
+            item = self._queue.get(block=True, timeout=None)
+            if item is None:
                 self._queue.task_done()
-            finally:
-                # TODO: Acquire a lock per oneshot here in dispatcher instead
-                #  of having the oneshot class deal with it.
-                # TODO: How to deal with inter-thread communication - e.g.
-                # the usb plugin needs to communicate/signal GPIO somehow to
-                # blink that it is busy. Likewise we may need a way to tell
-                # the logging thread to rotate the logs.
-                for oneshot in self._oneshots:
-                    if oneshot.condition(item):
-                        daemon = oneshot()
-                        daemon.start()
-                        daemon.put(item)
+                continue
+            for thread in self._threads:
+                if thread.consumes(item):
+                    thread.put(item)
+            self._queue.task_done()
+
+            # TODO: Test this logic
+            daemon_types = {type(daemon) for daemon in daemons}
+            for oneshot in self._oneshots:
+                if oneshot.condition(item) and oneshot not in daemon_types:
+                    daemon = oneshot()
+                    daemon.set_context(context)
+                    daemon.start()
+                    daemon.put(item)
+                    daemons.add(daemon)
 
         for thread in self._threads:
             APPLOG.debug("Exiting/Joining thread: <{}>".format(thread))
-            thread.exit(join=True)
+            thread.exit(join=False)
         APPLOG.debug("All threads joined and exited.")
+        self.release_lock()
 
     def exit(self, join=False):
-        if join:
-            _log.debug("Waiting for queue to empty.")
-            self._queue.join()
-            _log.debug("Queue joined, setting sigExit")
         self.sigExit.set()
+        if self.is_alive():
+            # We must check if we're still alive to see if it's necesarry to
+            # put a None object on the queue, else if we join the queue it
+            # may block indefinitely
+            self._queue.put(None)
+        if join:
+            for thread in self._threads:
+                thread.join()
+            self.join()
 
     def get_instance_of(self, klass):
         for obj in self._threads:

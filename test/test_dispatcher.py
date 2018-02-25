@@ -3,15 +3,16 @@
 import os
 import logging
 import threading
-from pathlib import Path
-
 import pytest
+import time
+
 from atgmlogger.plugins import PluginInterface, load_plugin
 
 root_log = logging.getLogger()
 if len(root_log.handlers):
     hdl0 = root_log.handlers[0]
-    hdl0.setFormatter(logging.Formatter("%(msecs)d::%(levelname)s - "
+    hdl0.setFormatter(logging.Formatter("%(asctime)s::%(module)s"
+                                        " %(levelname)s - "
                                         "%(funcName)s %(message)s"))
 
 Q_LEN = int(os.getenv('QUEUELENGTH', '5000'))
@@ -28,12 +29,14 @@ def test_dispatch(dispatcher):
     dispatcher.register(BasicModule)
     dispatcher.register(ComplexModule)
     for klass in [BasicModule, ComplexModule]:
-        assert klass in dispatcher.registered_listeners()
+        assert klass in dispatcher
 
     dispatcher.start()
     for i in range(Q_LEN):
         dispatcher.put(SimplePacket(i))
+    dispatcher.message_queue.join()
     dispatcher.exit(join=True)
+    assert not dispatcher.is_alive()
 
     bm = dispatcher.get_instance_of(BasicModule)
     cm = dispatcher.get_instance_of(ComplexModule)
@@ -55,7 +58,9 @@ def test_dispatch_selective_load(dispatcher):
     dispatcher.start()
     for i in range(Q_LEN):
         dispatcher.put(SimplePacket(i))
+    dispatcher.message_queue.join()
     dispatcher.exit(join=True)
+    assert not dispatcher.is_alive()
 
     bm = dispatcher.get_instance_of(BasicModule)
     cm = dispatcher.get_instance_of(ComplexModule)
@@ -66,11 +71,9 @@ def test_dispatch_selective_load(dispatcher):
 
 
 def test_load_plugin(dispatcher):
-    # this is needed for some reason due to relative import
-    from . import plugins
     plugin = load_plugin('basic_plugin', path="%s.plugins" % __package__,
                          register=True)
-    assert plugin in dispatcher.registered_listeners()
+    assert plugin in dispatcher
     plugin_opts = dict(smtp="smtp.google.com", username="testUser",
                        password="ask123a9")
     inst = plugin()
@@ -84,11 +87,11 @@ def test_load_plugin(dispatcher):
     assert t_item == inst.queue.get()
 
 
+# @pytest.mark.skip
 def test_load_subclassed_plugin(dispatcher):
-    from . import plugins
     plugin = load_plugin('subclassed_plugin', path="%s.plugins" % __package__,
                          register=False)
-    assert plugin not in dispatcher.registered_listeners()
+    assert plugin not in dispatcher
     inst = plugin()
     opts = dict(friendly_name="Subclassed Plugin", sleeptime=12, nullopt=None)
     assert not hasattr(inst, 'friendly_name')
@@ -103,4 +106,20 @@ def test_load_subclassed_plugin(dispatcher):
 def test_bad_plugin_path():
     with pytest.raises(ImportError):
         load_plugin('basic_plugin', path='atgmlogger')
+
+
+# @pytest.mark.skip
+def test_oneshot_plugin(dispatcher):
+    from ._mock_plugins import SimpleOneshot
+    dispatcher.register(SimpleOneshot)
+    assert SimpleOneshot in dispatcher
+    time.sleep(0.01)
+
+    dispatcher.start()
+    for i in range(2500):
+        dispatcher.put("Line %d" % i)
+
+    dispatcher.exit(join=True)
+    assert not dispatcher.is_alive()
+
 

@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-import os
 import sys
 import copy
 import json
@@ -10,18 +9,13 @@ from typing import Dict
 from pathlib import Path
 
 __all__ = ['atgmlogger', 'common', 'APPLOG', 'VERBOSITY_MAP', '__version__',
-           '__description__', 'rcParams', 'TIMEOUT']
+           '__description__', 'rcParams']
 
 __version__ = '0.3.3'
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
 
 
 VERBOSITY_MAP = {0: logging.WARNING, 1: logging.INFO, 2: logging.DEBUG}
-TIMEOUT = float(os.getenv("ATGM_TIMEOUT", 0))
-if TIMEOUT == 0:
-    TIMEOUT = None
-
-print("Using timeout: ", TIMEOUT)
 APPLOG = logging.getLogger()
 APPLOG.addHandler(logging.StreamHandler(sys.stderr))
 APPLOG.setLevel(VERBOSITY_MAP[0])

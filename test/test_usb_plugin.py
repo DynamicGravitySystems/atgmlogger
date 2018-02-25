@@ -8,7 +8,7 @@ from atgmlogger.plugins import load_plugin, PluginInterface
 
 @pytest.fixture
 def usb_plugin():
-    klass = load_plugin('usb', path='atgmlogger.plugins')
+    klass = load_plugin('usb', path='atgmlogger.plugins', register=False)
     return klass
 
 
@@ -31,7 +31,6 @@ def test_usb_watchfiles(usb_plugin, mountpoint: Path):
     # import atgmlogger.plugins.usb as _usb
     # _usb.CHECK_PLATFORM = False
 
-    print(list(mountpoint.iterdir()))
     params = dict(mountpath=str(mountpoint),
                   logdir='test/logs',
                   patterns=['*.dat', '*.data', '*.grav', '*.log'])

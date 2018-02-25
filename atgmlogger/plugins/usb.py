@@ -10,6 +10,7 @@ import shutil
 import functools
 import subprocess
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -53,7 +54,7 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
     if prefix:
         dir_name = prefix[:5]+dir_name
 
-    illegals = '\\:<>?*/\"'  # Known illegal characters
+    illegals = frozenset('\\:<>?*/\"')  # Known illegal characters
     dir_name = "".join([c for c in dir_name if c not in illegals])
     return dir_name
 
@@ -89,7 +90,6 @@ def _filehook(pattern):
         def wrapper(self, *args, **kwargs):
             return func(self, *args, **kwargs)
         wrapper.filehook = re.compile(pattern)
-        # wrapper.filehook = pattern
         return wrapper
     return inner
 
@@ -101,7 +101,7 @@ class RemovableStorageHandler(PluginInterface):
 
     mountpath = Path('/media/removable')
     logdir = None
-    patterns = ['*.dat', '*.log']
+    patterns = ['*.dat', '*.log', '*.log.*']
 
     @classmethod
     @contextmanager
@@ -266,21 +266,18 @@ class RemovableStorageHandler(PluginInterface):
             return
 
         commands = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
+        # TODO: Put formatted date
+        # today = datetime
         result = 'Diagnostic Results ({dt}):\n\n'.format(dt='TodayPlaceholder')
         for cmd in commands:
             result += 'Command: %s\n' % cmd
             try:
-                output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
+                res = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
             except (subprocess.SubprocessError, FileNotFoundError):
                 APPLOG.exception("Exception executing diagnostic command: "
                                  "%s", cmd)
-                output = "Command Failed, see applog for exception details."
-            result += output + '\n\n'
+                res = "Command Failed, see applog for exception details."
+            result += res + '\n\n'
 
         with match.open('w+') as fd:
             fd.write(result)
-
-
-
-
-

@@ -57,6 +57,7 @@ class SerialListener:
 
     def exit(self):
         self.sigExit.set()
+        self._queue.put(None)
 
     @property
     def collector(self) -> queue.Queue:

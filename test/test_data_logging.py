@@ -18,7 +18,7 @@ def test_simple_logger(tmpdir):
     # print("Initial grav file: ", log_file)
 
     logger = SimpleLogger()
-    _params = dict(timeout=0.1, logfile=log_file)
+    _params = dict(logfile=log_file)
     logger.configure(**_params)
 
     for key, value in _params.items():
@@ -27,13 +27,13 @@ def test_simple_logger(tmpdir):
 
     accumulator = []
 
-    print("Starting logger")
     logger.start()
     for i in range(1000):
         item = LINE.format(idx=i)
         accumulator.append(item)
         logger.put(item)
-    logger.exit()
+    logger.exit(join=True)
+    assert not logger.is_alive()
 
     with log_file.open('r') as fd:
         for i, line in enumerate(fd):
@@ -45,11 +45,10 @@ def test_logger_rotate(tmpdir):
     log_file = test_dir.joinpath('gravdata.dat')
 
     logger = SimpleLogger()
-    _params = dict(timeout=0.1, logfile=log_file)
+    _params = dict(logfile=log_file)
     logger.configure(**_params)
 
     accumulator = []
-    print("Starting logger")
     logger.start()
     rot_time = None
     rot_idx = 500
@@ -64,12 +63,13 @@ def test_logger_rotate(tmpdir):
         logger.put(item)
 
     logger.exit(join=True)
+    assert not logger.is_alive()
 
     orig_file = test_dir.joinpath('gravdata.dat.'+rot_time)
     assert orig_file.exists()
-    print(orig_file)
+    # print(orig_file)
     assert log_file.exists()
-    print(log_file)
+    # print(log_file)
     with orig_file.open('r') as fd:
         for i, line in enumerate(fd):
             assert accumulator[i] == line.strip()

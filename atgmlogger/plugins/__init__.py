@@ -5,13 +5,12 @@ import queue
 import threading
 from importlib import import_module
 
-__all__ = ['gpio', 'usb', 'PluginInterface', 'load_plugin']
+__all__ = ['PluginInterface', 'load_plugin']
 
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
-    # TODO: Make a specialized subclass for OneShot Plugins?
     options = []
-    oneshot = False  # or use a method i.e. is_oneshot() -> bool?
+    oneshot = False
 
     def __init__(self):
         super().__init__(name=self.__class__.__name__)
@@ -25,7 +24,8 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     def consumes(item) -> bool:
         return False
 
-    def condition(self, *args):
+    @classmethod
+    def condition(cls, *args):
         return False
 
     @abc.abstractmethod
@@ -53,11 +53,15 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
     def exit(self, join=False):
         if join:
-            self._queue.join()
+            self.queue.join()
         self._exitSig.set()
+        if self.is_alive():
+            self.queue.put(None)
+        if join:
+            self.join()
 
     def put(self, item):
-        self._queue.put_nowait(item)
+        self.queue.put_nowait(item)
 
     def get(self, block=True, timeout=None):
         """
@@ -70,7 +74,11 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
             else raise queue.Empty
 
         """
-        return self._queue.get(block=block, timeout=timeout)
+        return self.queue.get(block=block, timeout=timeout)
+
+    def task_done(self):
+        if hasattr(self.queue, 'task_done'):
+            self.queue.task_done()
 
     @property
     def configured(self) -> bool:

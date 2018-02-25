@@ -51,7 +51,8 @@ def sigExit():
 def dispatcher():
     disp = Dispatcher()
     yield disp
-    disp.exit()
+    if disp.is_alive():
+        disp.exit(join=True)
     disp.detach_all()
 
 
