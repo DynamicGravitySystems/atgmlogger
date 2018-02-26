@@ -57,7 +57,6 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         self._exitSig.set()
         if self.is_alive():
             self.queue.put(None)
-        if join:
             self.join()
 
     def put(self, item):

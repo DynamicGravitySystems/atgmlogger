@@ -12,7 +12,7 @@ LINE = "$UW,81242,-1948,557,4807924,307,872,204,6978,7541,-70,305,266," \
 
 def test_simple_logger(tmpdir):
 
-    test_dir = Path(tmpdir.mkdir('logs'))
+    test_dir = Path(str(tmpdir.mkdir('logs')))
     log_file = test_dir.joinpath('gravdata.dat')
     # print("Logging test_dir: ", test_dir)
     # print("Initial grav file: ", log_file)
@@ -32,8 +32,10 @@ def test_simple_logger(tmpdir):
         item = LINE.format(idx=i)
         accumulator.append(item)
         logger.put(item)
+
     logger.exit(join=True)
     assert not logger.is_alive()
+    print("logger has exited in test_simple_logger")
 
     with log_file.open('r') as fd:
         for i, line in enumerate(fd):
@@ -64,6 +66,7 @@ def test_logger_rotate(tmpdir):
 
     logger.exit(join=True)
     assert not logger.is_alive()
+    print("Logger has exited in test_logger_rotate")
 
     orig_file = test_dir.joinpath('gravdata.dat.'+rot_time)
     assert orig_file.exists()

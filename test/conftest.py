@@ -64,6 +64,6 @@ def logpath(request):
 @pytest.fixture
 def mountpoint(tmpdir):
     path = tmpdir.mkdir('mount')
-    return Path(path)
+    return Path(str(path))
 
 

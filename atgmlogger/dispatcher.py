@@ -117,6 +117,7 @@ class Dispatcher(threading.Thread):
         self._queue = queue.Queue()
         # self._threads = WeakSet()
         self._threads = set()
+        self._daemons = WeakSet()
         self._active_oneshots = WeakSet()
 
     @classmethod
@@ -131,10 +132,9 @@ class Dispatcher(threading.Thread):
         self._queue.put_nowait(item)
 
     def run(self):
-        lock = self.acquire_lock(blocking=True)
+        self.acquire_lock(blocking=True)
         APPLOG.debug("Dispatcher run acquired runlock")
         context = AppContext(self._queue)
-        daemons = WeakSet()
         for listener in self._listeners:
             try:
                 instance = listener()
@@ -158,20 +158,22 @@ class Dispatcher(threading.Thread):
             self._queue.task_done()
 
             # TODO: Test this logic
-            daemon_types = {type(daemon) for daemon in daemons}
+            daemon_types = {type(daemon) for daemon in self._daemons}
             for oneshot in self._oneshots:
                 if oneshot.condition(item) and oneshot not in daemon_types:
                     daemon = oneshot()
                     daemon.set_context(context)
                     daemon.start()
                     daemon.put(item)
-                    daemons.add(daemon)
+                    self._daemons.add(daemon)
 
-        for thread in self._threads:
-            APPLOG.debug("Exiting/Joining thread: <{}>".format(thread))
-            thread.exit(join=False)
-        APPLOG.debug("All threads joined and exited.")
         self.release_lock()
+
+    def _exit_threads(self, join=False):
+        for thread in self._threads:
+            thread.exit(join=join)
+        for daemon in self._daemons:
+            daemon.exit(join=join)
 
     def exit(self, join=False):
         self.sigExit.set()
@@ -180,9 +182,8 @@ class Dispatcher(threading.Thread):
             # put a None object on the queue, else if we join the queue it
             # may block indefinitely
             self._queue.put(None)
+        self._exit_threads(join=join)
         if join:
-            for thread in self._threads:
-                thread.join()
             self.join()
 
     def get_instance_of(self, klass):
