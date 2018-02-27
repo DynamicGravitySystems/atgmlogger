@@ -1,11 +1,16 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 
-import queue
+import io
+import logging
+import datetime
 import threading
-from .common import Blink
-from atgmlogger import APPLOG
-__all__ = ['DataLogger']
+from pathlib import Path
 
+from atgmlogger import APPLOG
+from .plugins import PluginInterface
+from .common import Command
+
+__all__ = ['DataLogger', 'SimpleLogger']
 DATA_LVL = 75
 
 
@@ -21,47 +26,111 @@ def level_filter(level):
     return _filter
 
 
-class DataLogger(threading.Thread):
+class DataLogger(PluginInterface):
     """
-    Parameters
-    ----------
-    data_queue : Union[queue.Queue, mp.Queue]
-    logger : logging.Logger
-    exit_sig : threading.Event
-    gpio_queue : queue.PriorityQueue
+    DataLogger conforms to the PluginInterface spec but is not really
+    intended to be pluggable or optional.
+    It should be explicitly
+    imported/loaded in the main program logic/init.
+    DataLogger is designed to simply process data from a queue and log it to
+    a python logging logger - typically to a file as defined in the program
+    configuration (see rcParams).
     """
-    # TODO: Pass logger config dict here for init?
-    def __init__(self, data_queue, logger, exit_sig, gpio_queue=None):
-        super().__init__(name=self.__class__.__name__)
-        self._data_queue = data_queue
-        self._exiting = exit_sig
-        self._logger = logger
-        self._internal_copy = []
-        self._gpio_queue = gpio_queue or queue.PriorityQueue()
+    options = ['loggername', 'datalvl']
 
-        # TODO: Infer data rate to better control blinking
-        self._blink_data = Blink(11, frequency=0.05)
+    def __init__(self, logger=None):
+        super().__init__()
+        self._logger = logger or logging.getLogger(__name__)
+
+    def consumes(self, item):
+        return isinstance(item, str) or isinstance(item, Command)
+
+    def logrotate(self):
+        APPLOG.debug("Doing logrotate")
+        raise NotImplementedError("Logrotate not yet implemented")
 
     def run(self):
-        while not self._exiting.is_set() or not self._data_queue.empty():
+        while not self.exiting:
             try:
-                data = self._data_queue.get(block=True, timeout=0.1)
-                self._internal_copy.append(data)
-                self._logger.log(DATA_LVL, data)
-                self._gpio_queue.put_nowait(self._blink_data)
-            except queue.Empty:
-                # Using timeout and empty exception allows for thread to
-                # check exit signal
-                continue
-            except queue.Full:
-                continue
+                item = self.get(block=True, timeout=None)
+                if item is None:
+                    self.task_done()
+                    continue
+                if isinstance(item, Command) and item.cmd == 'rotate':
+                    self.logrotate()
+                else:
+                    self._logger.log(DATA_LVL, item)
             except FileNotFoundError:
                 APPLOG.error("Log handler file path not found, data will not "
-                              "be saved.")
-            try:
-                self._data_queue.task_done()
-            except AttributeError:
-                # In case of multiprocessing.Queue
-                pass
+                             "be saved.")
+            self.task_done()
 
-        APPLOG.debug("Exiting DataLogger thread.")
+        APPLOG.debug("Exited DataLogger thread.")
+
+    def configure(self, **options):
+        super().configure(**options)
+        if 'loggername' in options:
+            self._logger = logging.getLogger(options['loggername'])
+
+
+# TODO: this will be renamed
+class SimpleLogger(PluginInterface):
+    options = ['logfile']
+
+    def __init__(self):
+        super().__init__()
+        self.logfile = Path('gravdata.dat')
+        self._hdl = None  # type: io.TextIOBase
+        self._params = dict(mode='w+', buffering=1, encoding='utf-8',
+                            newline='\n')
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def consumes(item):
+        return isinstance(item, str) or isinstance(item, Command)
+
+    def logrotate(self):
+        with self._lock:
+            APPLOG.debug("Performing logrotate")
+            if self._hdl is None:
+                return
+
+            try:
+                self._hdl.flush()
+                self._hdl.close()
+            except IOError:
+                APPLOG.exception()
+                return
+            suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M')
+            base = self.logfile.parent.resolve()
+            target = base.joinpath('{name}.{suffix}'
+                                   .format(name=self.logfile.name,
+                                           suffix=suffix))
+            self.logfile.rename(target)
+            self._hdl = self.logfile.open(**self._params)
+
+    def run(self):
+        try:
+            self._hdl = self.logfile.open(**self._params)
+        except IOError:
+            APPLOG.exception("Error opening file for writing.")
+            return
+
+        while not self.exiting:
+            try:
+                item = self.get(block=True, timeout=None)
+                if item is None:
+                    self.queue.task_done()
+                    continue
+                if isinstance(item, Command) and item.cmd == 'rotate':
+                    self.logrotate()
+                else:
+                    self._hdl.write(item + '\n')
+                    self.queue.task_done()
+            except IOError:
+                APPLOG.exception()
+                continue
+        self._hdl.close()
+
+    def configure(self, **options):
+        super().configure(**options)

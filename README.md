@@ -5,7 +5,7 @@ Dynamic Gravity Systems - Serial Data Recorder
  	- Python v3.5 or 3.6 or later, and the following modules:
 		- pyserial >= 3.3
 		- RPi.GPIO >= 0.6.3
-	- The following system packages are required for full functionality of the USB data copying:
+	- The following system packages are required for full functionality of the USB collector copying:
 		- ntfs-3g
 		- exfat-fuse
 		- exfat-utils

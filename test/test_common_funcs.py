@@ -3,103 +3,31 @@
 import os
 import sys
 import copy
-import threading
 import datetime
 import logging
-import time
-import queue
-import multiprocessing as mp
 from pathlib import Path
-from pprint import pprint
+import pytest
 
 from atgmlogger import atgmlogger, common, _ConfigParams
+from atgmlogger.plugins import load_plugin
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
 _log.addHandler(logging.StreamHandler(stream=sys.stderr))
 
-SLEEPTIME = float(os.getenv('SLEEPTIME', .5))
 
+def test_atgmlogger_plugins(rcParams):
+    # This is causing errors in the test_dispatcher suite, maybe the
+    # registration happening twice?
+    plugins = rcParams['plugins']
+    for key in ['usb', 'timesync']:
+        assert key in plugins
 
-def join_threads(threads, timeout=0.1):
-    for thread in threads:
+    for plugin in plugins:
         try:
-            thread.join(timeout=timeout)
-        except:
-            continue
-
-
-def test_at1logger(handle, logger, sigExit):
-    data_queue = queue.Queue()
-    atgm = atgmlogger.SerialListener(handle,
-                                     data_queue=data_queue,
-                                     exit_sig=sigExit)
-    listen_th = threading.Thread(target=atgm.listen, name='listener')
-
-    cmd_listener = atgmlogger.CommandListener(atgm.commands,
-                                              exit_sig=sigExit)
-    writer = atgmlogger.DataLogger(data_queue,
-                                   logger=logger,
-                                   exit_sig=sigExit)
-
-    threads = [listen_th, cmd_listener, writer]
-    for thread in threads:
-        thread.start()
-
-    in_list = list()
-    for i in range(0, 1001):
-        decoded = "Line: {}".format(i)
-        data = "Line: {}\n".format(i).encode('latin-1')
-        in_list.append(decoded)
-        handle.write(data)
-
-    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
-    time.sleep(SLEEPTIME)
-    sigExit.set()
-    join_threads(threads)
-
-    assert in_list == writer._internal_copy
-    assert in_list == logger.accumulator
-
-
-def test_mproc_queue(handle, logger, sigExit):
-    # Test use of multiprocessing.Queue with listener and DataLogger
-    data_queue = mp.Queue()
-    atgm = atgmlogger.SerialListener(handle,
-                                     data_queue=data_queue,
-                                     exit_sig=sigExit)
-    listener = threading.Thread(target=atgm.listen, name='listener')
-    writer = atgmlogger.DataLogger(data_queue,
-                                   logger=logger,
-                                   exit_sig=sigExit)
-
-    threads = [listener, writer]
-    for thread in threads:
-        thread.start()
-
-    in_list = list()
-    for i in range(0, 1001):
-        decoded = "Line: {}".format(i)
-        raw = "Line: {}\n".format(i).encode('latin-1')
-        in_list.append(decoded)
-        handle.write(raw)
-
-    _log.debug("Sleeping for %.2f seconds.", SLEEPTIME)
-    time.sleep(SLEEPTIME)
-    sigExit.set()
-    join_threads(threads)
-
-    assert in_list == writer._internal_copy
-    assert in_list == logger.accumulator
-
-
-def test_gpio_failure(sigExit):
-    # Test that GPIO fails gracefully
-    gpio_th = atgmlogger.GPIOListener({},
-                                      gpio_queue=queue.PriorityQueue(),
-                                      exit_sig=sigExit)
-
-    gpio_th.start()
+            load_plugin(plugin, register=False)
+        except ImportError:
+            pass
 
 
 def test_decode():
@@ -152,15 +80,15 @@ def test_timestamp_from_data():
 
 def test_parse_args():
     from atgmlogger import rcParams
-    cfg_path = Path('test/.atgmlogger')
+    cfg_path = Path('atgmlogger/install/.atgmlogger')
     with cfg_path.open('r') as fd:
         rcParams.load_config(fd)
-    argv = ['atgmlogger.py', '-vvv', '-c', 'test/.atgmlogger', '--logdir',
-            '/var/log/atgmlogger']
+    argv = ['atgmlogger.py', '-vvv', '-c', 'atgmlogger/install/.atgmlogger',
+            '--logdir', '/var/log/atgmlogger']
     args = common.parse_args(argv)
 
     assert args.verbose == 3
-    assert args.config == 'test/.atgmlogger'
+    assert args.config == 'atgmlogger/install/.atgmlogger'
     assert args.logdir == '/var/log/atgmlogger'
     assert rcParams['logging.logdir'] == '/var/log/atgmlogger'
 
@@ -194,7 +122,7 @@ def test_fallback_config(cfg_dict):
     cfg = _ConfigParams()
     # Selectively exclude logging node due to filepath expansion
     # Don't feel like fixing that yet.
-    for node in ['version', 'serial', 'usb', 'gpio']:
+    for node in ['version', 'serial', 'usb']:
         assert cfg[node] == cfg_dict[node]
 
 
@@ -213,7 +141,7 @@ def test_config_default(cfg_dict):
 
 
 def test_configparams_search(cfg_dict):
-    cfg = _ConfigParams(path='test/.atgmlogger')
+    cfg = _ConfigParams(path='atgmlogger/install/.atgmlogger')
 
     assert cfg.config == cfg_dict
 
@@ -224,11 +152,12 @@ def test_config_notexist(cfg_dict):
     assert cfg['badkey.badbranch'] is None
 
 
-def test_expand_path(cfg_dict):
+def test_expand_path(cfg_dict, logpath):
     orig = copy.deepcopy(cfg_dict)
     cfg = _ConfigParams(config=cfg_dict)
-    cfg._expand_paths(cfg.config['logging'], 'filename', '/var/log')
+    log_conf = cfg['logging']
+    atgmlogger._expand_log_paths(log_conf, logpath, key='filename')
 
-    assert (cfg['logging.handlers.data_hdlr.filename'] ==
-            os.path.normpath('/var/log/gravdata.dat'))
+    assert log_conf['handlers']['data_hdlr']['filename'] == os.path.normpath(
+        '/var/log/gravdata.dat')
 

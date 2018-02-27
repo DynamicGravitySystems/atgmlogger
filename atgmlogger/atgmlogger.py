@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
 """
@@ -9,179 +8,23 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 
 """
 
-import os
 import sys
 import time
 import queue
 import logging
 import logging.config
 import threading
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from pprint import pprint
+# from pprint import pprint
 
 import serial
-try:
-    import RPi.GPIO as gpio
-    HAVE_GPIO = True
-except (ImportError, RuntimeError):
-    HAVE_GPIO = False
 
-from .common import *
-from .removable import RemovableStorageHandler
-from .logger import DataLogger
-from atgmlogger import VERBOSITY_MAP, APPLOG, rcParams
+from .common import parse_args, decode
+from .dispatcher import Dispatcher
+from .plugins import load_plugin
+from . import VERBOSITY_MAP, APPLOG, rcParams
 
-JOIN_TIMEOUT = 0.1
-POLL_RATE = 1
-CONFIG_PATH = '.atgmlogger'
 DATA_LVL = 75
-
-
-class GPIOListener(threading.Thread):
-    def __init__(self, config, gpio_queue: queue.PriorityQueue, exit_sig):
-        super().__init__(name=self.__class__.__name__, daemon=True)
-        if not HAVE_GPIO:
-            APPLOG.warning("GPIO Module Unavailable on this System.")
-            return
-        self._queue = gpio_queue
-        self._exiting = exit_sig
-
-        modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
-        self._mode = modes[config.get('mode', 'board')]
-        self.data_pin = config.get('data_led', 11)
-        self.usb_pin = config.get('usb_led', 13)
-
-        self.outputs = [self.data_pin, self.usb_pin]
-
-        gpio.setmode(self._mode)
-        for pin in self.outputs:
-            gpio.setup(pin, gpio.OUT)
-
-    def _blink(self, blink: Blink):
-        if blink.led not in self.outputs:
-            return
-        if HAVE_GPIO:
-            gpio.output(blink.led, True)
-            time.sleep(blink.frequency)
-            gpio.output(blink.led, False)
-            time.sleep(blink.frequency)
-
-    def run(self):
-        if not HAVE_GPIO:
-            APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
-                           self.__class__.__name__)
-            return
-
-        while not self._exiting.is_set():
-            try:
-                blink = self._queue.get(timeout=.1)  # type: Blink
-            except queue.Empty:
-                continue
-            self._blink(blink)
-            self._queue.task_done()
-
-        for pin in self.outputs:
-            gpio.output(pin, False)
-        APPLOG.debug("Exiting GPIOListener thread.")
-        gpio.cleanup()
-
-
-class Command:
-    # TODO: Add on_complete hook? allow firing of lambda on success
-    """
-    Command class which encapsulates a function and its arguments, to be
-    executed by the CommandListener subscriber.
-
-    Commands may be assigned an int priority where 0 is the highest priority.
-    This class implements the necessary interface to be compatible with the
-    PriorityQueue. e.g.:
-        Command[0] returns the priority
-        Command < OtherCommand returns True if Command.priority <
-        OtherCommand.priority
-
-    The result of the executed function is returned via the execute or call
-    methods to be captured if necessary.
-
-    """
-    def __init__(self, command, *cmd_args, priority=None, name=None, log=True,
-                 **cmd_kwargs):
-        self.priority = priority or 9
-        self.functor = command
-        self.name = name or command.__name__
-        self._log = True
-        self._args = cmd_args
-        self._kwargs = cmd_kwargs
-
-    def execute(self):
-        res = self.functor(*self._args, **self._kwargs)
-        if self._log:
-            APPLOG.info("Command {name} executed with result: {"
-                        "result}".format(name=self.name, result=res))
-        return res
-
-    def __getitem__(self, item):
-        if item == 0:
-            return self.priority
-        raise IndexError
-
-    def __lt__(self, other):
-        return self.priority < other.priority
-
-
-class CommandListener(threading.Thread):
-    """
-    Attributes
-    ----------
-    command_queue : queue.PriorityQueue
-    exit_sig : threading.Event
-
-    """
-    def __init__(self, command_queue, exit_sig):
-        super().__init__(name=self.__class__.__name__)
-        self._cmd_queue = command_queue
-        self._exiting = exit_sig
-        self._results = list()
-
-    def run(self):
-        while not self._exiting.is_set():
-            try:
-                cmd = self._cmd_queue.get(block=True, timeout=1)
-            except queue.Empty:
-                continue
-            result = cmd.execute()
-            self._results.append(result)
-            APPLOG.debug("Command executed without exception.")
-            self._cmd_queue.task_done()
-
-        APPLOG.debug("Exiting %s thread.", self.__class__.__name__)
-
-
-class MountListener(threading.Thread):
-    """Simple thread that watches a mount_path then forks a subprocess to
-    perform actions when a device is mounted."""
-    def __init__(self, mount_path, log_dir, exit_sig):
-        super().__init__(name=self.__class__.__name__)
-
-        self._exiting = exit_sig
-        self._mount = mount_path
-        self._logs = log_dir
-
-    def run(self):
-        if sys.platform == 'win32':
-            APPLOG.warning("%s not supported on Windows Platform",
-                           self.__class__.__name__)
-            return
-        while not self._exiting.is_set():
-            # Check for device mount at mount path, sleep for POLL_RATE if none
-            if os.path.ismount(self._mount):
-                APPLOG.debug("Mount detected on %s", self._mount)
-                dispatcher = RemovableStorageHandler(self._mount, self._logs)
-                APPLOG.info("Starting USB dispatcher.")
-                dispatcher.start()
-                dispatcher.join()
-            else:
-                time.sleep(POLL_RATE)
 
 
 class SerialListener:
@@ -193,50 +36,36 @@ class SerialListener:
     capturing raw serial data from a serial device.
     Ingested serial data is pushed onto a Queue for consumption by another
     thread or subprocess. This is to ensure that ideally no serial data is
-    lost due to the listener waiting for a write event to complete (
-    especially at higher data rates).
+    lost due to the listener waiting for a write event to complete
+    (especially at higher data rates).
 
     Parameters
     ----------
     handle : serial.Serial
-    exit_sig : threading.Event
-    data_queue : queue.Queue
+    collector : queue.Queue, Optional
+    sigExit : threading.Event, Optional
 
     """
 
-    def __init__(self, handle, exit_sig, data_queue=None, cmd_queue=None):
+    def __init__(self, handle, collector=None, sigExit=None):
         self._handle = handle
-        self._timesynced = False
-        # Set defaults if no queue's are supplied.
-        self._data_queue = data_queue or queue.Queue()
-        self._cmd_queue = cmd_queue or queue.PriorityQueue()
-        self._exiting = exit_sig
+        self._queue = collector or queue.Queue()
+        self.sigExit = sigExit or threading.Event()
 
         if not self._handle.is_open:
             self._handle.open()
 
-    @property
-    def data(self) -> queue.Queue:
-        return self._data_queue
+    def exit(self):
+        self.sigExit.set()
+        self._queue.put(None)
 
     @property
-    def commands(self) -> queue.PriorityQueue:
-        return self._cmd_queue
+    def collector(self) -> queue.Queue:
+        return self._queue
 
     @property
-    def exiting(self) -> threading.Event:
-        return self._exiting
-
-    def _sync_time(self, data):
-        APPLOG.info("Attempting to synchronize to GPS time.")
-        ts = timestamp_from_data(data)
-        if ts is None:
-            APPLOG.info("Unable to synchronize time, no valid GPS time data.")
-            return False
-        else:
-            cmd = Command(set_system_time, ts, priority=1)
-            self._cmd_queue.put_nowait(cmd)
-            return True
+    def exiting(self) -> bool:
+        return self.sigExit.is_set()
 
     def listen(self):
         """
@@ -249,123 +78,135 @@ class SerialListener:
         separate thread to be processed.
 
         """
-        tick = 99
-        while not self.exiting.is_set():
+        while not self.exiting:
             data = decode(self._handle.readline())
-            if data == '':
+            if data is None or data == '':
                 continue
-            self._data_queue.put_nowait(data)
-            tick += 1
-            # TODO: Consider periodically re-synchronizing (every 12hrs?)
-            if not self._timesynced and (tick % 100 == 0):
-                self._timesynced = self._sync_time(data)
-            elif tick % 10000 == 0:
-                APPLOG.debug("Attempting to resynchronize time after 10000 "
-                             "ticks.")
-                self._sync_time(data)
+            self._queue.put_nowait(data)
 
         APPLOG.debug("Exiting listener.listen() method, and closing serial "
                      "handle.")
         self._handle.close()
 
 
-def run(*argv):
-    """
-    Initialize and start main application loop.
-
+def _expand_log_paths(base, prefix, key='filename'):
+    """Traverse a given 'base' dictionary searching for key (
+    default='filename'), and update the key's value by prepending the
+    specified prefix to it.
+    The base dictionary is recursively traversed (searching all
+    sub-dictionaries) to find any of the specified key.
 
     Parameters
     ----------
-    argv
-
-    Returns
-    -------
+    base : dict
+        The base dictionary to begin the recursive search and update.
+    prefix : str or Path
 
     """
-    if argv is None:
-        argv = sys.argv
-    t_start = time.perf_counter()
-    args = parse_args(argv)
-    APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+    if not isinstance(prefix, Path):
+        prefix = Path(prefix)
+    for k, v in base.items():
+        if k == 'filename':
+            expanded = prefix.joinpath(v)
+            base[k] = str(expanded)
+        elif isinstance(v, dict):
+            _expand_log_paths(v, prefix, key=key)
 
-    # Attempt to run first-run installation script
-    if not os.path.exists("/etc/%s/.atgmlogger" % __name__):
-        APPLOG.info("Configuring ATGMLogger for first run.")
-        try:
-            from . import install
-            install.install(verbose=True)
 
-        except (ImportError, RuntimeError):
-            APPLOG.exception("Failed to import/execute first run "
-                             "initialization script")
+def _configure_logger():
+    log_dir = Path(rcParams['logging.logdir']) or \
+              Path('~').expanduser().joinpath('atgmlogger')
 
-    log_dir = Path(rcParams['logging.logdir']) or Path('~').joinpath('atgmlogger')
     APPLOG.debug("Logging path set to: %s", str(log_dir))
+    if not log_dir.exists():
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except (FileNotFoundError, OSError):
+            APPLOG.warning("Log directory %s could not be created, log files "
+                           "will be created in current directory (%s)",
+                           str(log_dir), str(Path().resolve()))
+            log_dir = Path()
     try:
-        log_dir.mkdir(parents=False, exist_ok=True)
-    except FileNotFoundError:
-        log_dir = Path('.')
-    try:
-        logging.config.dictConfig(rcParams['logging'])
-        data_log = logging.getLogger()
-        APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+        log_conf = rcParams['logging']
+        _expand_log_paths(log_conf, log_dir, key='filename')
+
+        logging.config.dictConfig(log_conf)
+        _log = logging.getLogger()
     except (ValueError, TypeError, AttributeError, ImportError):
         APPLOG.exception("Exception applying logging configuration, fallback "
                          "configuration will be used.")
-        data_log = logging.getLogger()
+        from logging.handlers import TimedRotatingFileHandler
+        _log = logging.getLogger()
         fpath = str(log_dir.joinpath('gravity.dat').resolve())
         data_hdlr = TimedRotatingFileHandler(fpath, when='D', interval=7,
                                              encoding='utf-8', delay=True,
                                              backupCount=8)
-        data_log.addHandler(data_hdlr)
-        data_log.setLevel(DATA_LVL)
+        _log.addHandler(data_hdlr)
+        _log.setLevel(DATA_LVL)
     else:
         APPLOG.info("Logging facility configured from rcParams")
+    return _log
 
-    # Initialize and Run #
-    exit_event = threading.Event()
-    data_queue = queue.Queue()
-    cmd_queue = queue.PriorityQueue()
-    gpio_queue = queue.PriorityQueue(maxsize=10)
 
-    hdl = serial.Serial(**rcParams['serial'])
-    listener = SerialListener(hdl,
-                              exit_sig=exit_event,
-                              data_queue=data_queue,
-                              cmd_queue=cmd_queue)
+def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
+    dispatcher = Dispatcher(collector=collector)
 
-    threads = []
-    if not args.nogpio and HAVE_GPIO:
-        threads.append(GPIOListener(rcParams['gpio'],
-                                    gpio_queue=gpio_queue,
-                                    exit_sig=exit_event))
+    # Explicitly register the DataLogger 'plugin'
+    from .logger import DataLogger
+    dispatcher.register(DataLogger)
 
-    threads.append(DataLogger(data_queue,
-                              logger=data_log,
-                              exit_sig=exit_event,
-                              gpio_queue=gpio_queue))
+    plugins = plugins or rcParams['plugins']
+    if plugins is not None:
+        for plugin in plugins:
+            try:
+                load_plugin(plugin, register=True, **plugins[plugin])
+                APPLOG.info("Loaded plugin: %s", plugin)
+            except ImportError:  # ModuleNotFoundError implemented in 3.6
+                if verbosity is not None and verbosity >= 2:
+                    APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
+                else:
+                    APPLOG.warning("Plugin <%s> could not be loaded.", plugin)
+    return dispatcher
 
-    threads.append(CommandListener(cmd_queue,
-                                   exit_sig=exit_event))
 
-    threads.append(MountListener(rcParams['usb.mount'],
-                                 log_dir=log_dir,
-                                 exit_sig=exit_event))
+def _get_handle():
+    if '://' in str(rcParams['serial.port']).lower():
+        params = rcParams['serial']
+        url = params.pop('port')
+        hdl = serial.serial_for_url(url=url, **params)
+    else:
+        hdl = serial.Serial(**rcParams['serial'])
+    return hdl
 
-    for thread in threads:
-        thread.start()
 
-    APPLOG.debug("Initialization time: %.5f", time.perf_counter() - t_start)
+def run(*argv, listener=None, handle=None, dispatcher=None):
+    if argv is None:
+        argv = sys.argv
+
+    # Init Performance Counter
+    t_start = time.perf_counter()
+
+    args = parse_args(argv)
+    APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
+    _configure_logger()
+
+    if listener is None:
+        listener = SerialListener(handle or _get_handle())
+    dispatcher = dispatcher or _get_dispatcher(collector=listener.collector,
+                                               verbosity=args.verbose)
+
+    # End Init Performance Counter
+    t_end = time.perf_counter()
+    if args.verbose:
+        APPLOG.debug("Initialization time: %.4f", t_end - t_start)
+
     try:
-        # Infinite Main Thread - Listen for Serial Data
-        APPLOG.debug("Starting serial listener.")
+        dispatcher.start()
         listener.listen()
     except KeyboardInterrupt:
-        APPLOG.debug("KeyboardInterrupt intercepted. Setting exit signal.")
-        exit_event.set()
-        for thread in threads:
-            APPLOG.debug("Joining thread {}, timeout {}"
-                         .format(thread.name, JOIN_TIMEOUT))
-            thread.join(timeout=JOIN_TIMEOUT)
-        return 1
+        APPLOG.info("Keyboard Interrupt intercepted, initiating clean exit.")
+        listener.exit()
+        dispatcher.exit(join=True)
+        APPLOG.debug("Dispatcher exited.")
+
     return 0

@@ -9,7 +9,7 @@ requirements = [
 setup(
     name='atgmlogger',
     version=__version__,
-    packages=['atgmlogger'],
+    packages=['atgmlogger', 'atgmlogger.plugins', 'test', 'test.plugins'],
     url='https://github.com/bradyzp/dgs-serial-logger',
     license='',
     author='Zachery Brady',
@@ -23,5 +23,7 @@ setup(
         'console_scripts': [
             'atgmlogger = atgmlogger.atgmlogger:run'
         ]
-    }
+    },
+    setup_requires=['pytest-runner'],
+    tests_require=['pytest']
 )
