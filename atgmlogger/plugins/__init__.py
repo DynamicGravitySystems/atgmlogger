@@ -133,11 +133,15 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     except ImportError:
         raise
 
-    klass = getattr(plugin, '__plugin__')
+    try:
+        klass = getattr(plugin, '__plugin__')
+    except AttributeError:
+        raise ImportError("__plugin__ is not defined in plugin module %s." %
+                          name)
     if isinstance(klass, str):
         klass = getattr(plugin, klass)
     if klass is None:
-        raise ImportError("No __plugin__ specified in plugin module.")
+        raise ImportError("__plugin__ is None in plugin module %s." % name)
     if not issubclass(klass, PluginInterface):
         klass = type(name, (klass, PluginInterface), {})
     if register:

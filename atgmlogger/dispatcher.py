@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
-import threading
 import queue
+import threading
 from weakref import WeakSet
 
 from . import APPLOG
@@ -22,40 +22,6 @@ characteristics/standards must be followed by any pluggable module.
 Registered modules could then be enabled/disabled on startup via 
 configuration file directives. Parameters could then be defined within 
 the module directive for the tweaking of the modules.
-
-=====
-Considering the nature of how we want to deal with plugins:
-
-Configuration file will have a 'plugin' block where the keys are the names of 
-the plugin module, the value (dict) can contain optional parameters, 
-like when the plugin is executed, or other params specific to the plugin, 
-e.g. for an email sending plugin the smtp server/credentials would need to be 
-specified.
-
-All plugins must be python modules (probably self contained?) and must be 
-located in a specific directory (consider a search path like for the config 
-file).
-Use module level variable pointing to the 'exported' class?
-e.g. PLUGIN = MyPluginClass
-
-So the general concept:
-
-Main loads config -> for plugin in config try to load plugin module -> 
-register the plugin class with dispatcher -> start dispatcher.
-
-What I might be able to do is dynamically create a Wrapper which subclasses 
-the plugin AND ModuleInterface - this will then raise a TypeError on 
-instantiation if the plugin class does not implement the abstract methods.
-This will also allow the plugin to indirectly override concrete methods in 
-the ABC.
-e.g.
-
-class PluginWrapper(Plugin, ModuleInterface):
-    pass
-    
-p1 = PluginWrapper()
-# raises TypeError if Plugin does not implement ModuleInterface abstractmethods
-
 
 """
 
@@ -111,10 +77,10 @@ class Dispatcher(threading.Thread):
         APPLOG.debug("%s releasing runlock", cls)
         cls._runlock.release()
 
-    def __init__(self, sigExit=None):
+    def __init__(self, collector=None, sigExit=None):
         super().__init__(name=self.__class__.__name__)
         self.sigExit = sigExit or threading.Event()
-        self._queue = queue.Queue()
+        self._queue = collector or queue.Queue()
         # self._threads = WeakSet()
         self._threads = set()
         self._daemons = WeakSet()
@@ -166,6 +132,7 @@ class Dispatcher(threading.Thread):
                     daemon.start()
                     daemon.put(item)
                     self._daemons.add(daemon)
+                    del daemon
 
         self.release_lock()
 
@@ -203,5 +170,3 @@ class AppContext:
     def logrotate(self):
         cmd = Command('logrotate')
         self._queue.put_nowait(cmd)
-
-

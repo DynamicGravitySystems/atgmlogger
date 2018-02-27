@@ -118,10 +118,14 @@ def _configure_logger():
               Path('~').expanduser().joinpath('atgmlogger')
 
     APPLOG.debug("Logging path set to: %s", str(log_dir))
-    try:
-        log_dir.mkdir(parents=False, exist_ok=True)
-    except FileNotFoundError:
-        log_dir = Path('.')
+    if not log_dir.exists():
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except (FileNotFoundError, OSError):
+            APPLOG.warning("Log directory %s could not be created, log files "
+                           "will be created in current directory (%s)",
+                           str(log_dir), str(Path().resolve()))
+            log_dir = Path()
     try:
         log_conf = rcParams['logging']
         _expand_log_paths(log_conf, log_dir, key='filename')
@@ -144,10 +148,40 @@ def _configure_logger():
     return _log
 
 
-def run(*argv):
+def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
+    dispatcher = Dispatcher(collector=collector)
+
+    # Explicitly register the DataLogger 'plugin'
+    from .logger import DataLogger
+    dispatcher.register(DataLogger)
+
+    plugins = plugins or rcParams['plugins']
+    if plugins is not None:
+        for plugin in plugins:
+            try:
+                load_plugin(plugin, register=True, **plugins[plugin])
+                APPLOG.info("Loaded plugin: %s", plugin)
+            except ImportError:  # ModuleNotFoundError implemented in 3.6
+                if verbosity is not None and verbosity >= 2:
+                    APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
+                else:
+                    APPLOG.warning("Plugin <%s> could not be loaded.", plugin)
+    return dispatcher
+
+
+def _get_handle():
+    if '://' in str(rcParams['serial.port']).lower():
+        params = rcParams['serial']
+        url = params.pop('port')
+        hdl = serial.serial_for_url(url=url, **params)
+    else:
+        hdl = serial.Serial(**rcParams['serial'])
+    return hdl
+
+
+def run(*argv, listener=None, handle=None, dispatcher=None):
     if argv is None:
         argv = sys.argv
-    APPLOG.debug("Run received arguments: {}".format(argv))
 
     # Init Performance Counter
     t_start = time.perf_counter()
@@ -156,30 +190,15 @@ def run(*argv):
     APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
     _configure_logger()
 
-    dispatcher = Dispatcher()
-
-    # Explicitly register the DataLogger 'plugin'
-    from .logger import DataLogger
-    dispatcher.register(DataLogger)
-
-    plugins = rcParams['plugins']
-    if plugins is not None:
-        for plugin in plugins:
-            try:
-                load_plugin(plugin, register=True, **plugins[plugin])
-                APPLOG.info("Loaded plugin: %s", plugin)
-            except ImportError:  # ModuleNotFoundError implemented in 3.6
-                if args.verbose is not None and args.verbose > 2:
-                    APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
-                else:
-                    APPLOG.warning("Plugin <%s> could not be loaded.", plugin)
-
-    hdl = serial.Serial(**rcParams['serial'])
-    listener = SerialListener(hdl, collector=dispatcher.message_queue)
+    if listener is None:
+        listener = SerialListener(handle or _get_handle())
+    dispatcher = dispatcher or _get_dispatcher(collector=listener.collector,
+                                               verbosity=args.verbose)
 
     # End Init Performance Counter
     t_end = time.perf_counter()
-    APPLOG.debug("Initialization time: %.4f", t_end - t_start)
+    if args.verbose:
+        APPLOG.debug("Initialization time: %.4f", t_end - t_start)
 
     try:
         dispatcher.start()

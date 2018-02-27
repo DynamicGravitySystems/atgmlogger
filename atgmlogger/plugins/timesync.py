@@ -30,9 +30,14 @@ class TimeSync(PluginInterface):
                 set_system_time(ts)
             else:
                 APPLOG.debug("Timestamp could not be extracted from data.")
-        except:  # TODO: Be more specific
-            raise
-        self.queue.task_done()
+                raise ValueError("Invalid System Time Specified")
+        except ValueError:  # TODO: Be more specific
+            pass
+        else:
+            APPLOG.info("System time set to: %.2f", ts)
+        finally:
+            APPLOG.debug("TimeSync plugin exited.")
+            self.queue.task_done()
 
     @staticmethod
     def consumes(item) -> bool:
