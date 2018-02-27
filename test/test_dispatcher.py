@@ -5,6 +5,7 @@ import logging
 import threading
 import pytest
 
+from . import plugins  # needed for py3.6.2 for some reason
 from atgmlogger.plugins import PluginInterface, load_plugin
 
 root_log = logging.getLogger()

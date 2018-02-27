@@ -11,7 +11,7 @@ from pathlib import Path
 __all__ = ['atgmlogger', 'common', 'APPLOG', 'VERBOSITY_MAP', '__version__',
            '__description__', 'rcParams']
 
-__version__ = '0.3.3'
+__version__ = '0.3.4'
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
 
 

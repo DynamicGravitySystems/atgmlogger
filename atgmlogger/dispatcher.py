@@ -124,6 +124,8 @@ class Dispatcher(threading.Thread):
             self._queue.task_done()
 
             # TODO: Test this logic
+            # This is not ideal, though it seems to work. Maybe go with a
+            # dict of locks keyed by the oneshot Class
             daemon_types = {type(daemon) for daemon in self._daemons}
             for oneshot in self._oneshots:
                 if oneshot.condition(item) and oneshot not in daemon_types:

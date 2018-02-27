@@ -179,14 +179,11 @@ def _get_handle():
     return hdl
 
 
-def run(*argv, listener=None, handle=None, dispatcher=None):
-    if argv is None:
-        argv = sys.argv
-
+def run(listener=None, handle=None, dispatcher=None):
     # Init Performance Counter
     t_start = time.perf_counter()
 
-    args = parse_args(argv)
+    args = parse_args()
     APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
     _configure_logger()
 

@@ -19,11 +19,10 @@ __all__ = ['parse_args', 'decode', 'convert_gps_time', 'timestamp_from_data',
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255]))
 
 
-def parse_args(argv):
+def parse_args(argv=None):
     """Parse arguments from commandline and load configuration file."""
-    if not len(argv):
-        argv = ['atgmlogger']
-    parser = argparse.ArgumentParser(prog=argv[0], description=__description__)
+
+    parser = argparse.ArgumentParser(description=__description__)
     parser.add_argument('-V', '--version', action='version',
                         version=__version__)
     parser.add_argument('-v', '--verbose', action='count', default=0,
@@ -45,7 +44,11 @@ def parse_args(argv):
                         help="Uninstall module configurations and systemd "
                              "unit scripts.")
 
-    args = parser.parse_args(argv[1:])
+    if argv is not None:
+        args = parser.parse_args(argv[1:])
+    else:
+        args = parser.parse_args()
+
     if args.install:
         try:
             from . import install
