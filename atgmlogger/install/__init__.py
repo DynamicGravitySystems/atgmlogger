@@ -19,7 +19,7 @@ _log = logging.getLogger(__name__)
 _log.propagate = False
 _log.setLevel(logging.WARNING)
 if sys.platform.startswith('linux'):
-    _install_log_path = '%s/var/log/%s/install.log' % (PREFIX, BASEPKG)
+    _install_log_path = 'install.log'
 else:
     _install_log_path = 'install.log'
 
