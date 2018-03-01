@@ -8,7 +8,8 @@ import logging
 from pathlib import Path
 import pytest
 
-from atgmlogger import atgmlogger, common, _ConfigParams
+from atgmlogger import atgmlogger, common
+from atgmlogger.runconfig import _ConfigParams
 from atgmlogger.plugins import load_plugin
 
 _log = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def test_timestamp_from_data():
 
 
 def test_parse_args():
-    from atgmlogger import rcParams
+    from atgmlogger.runconfig import rcParams
     cfg_path = Path('atgmlogger/install/.atgmlogger')
     with cfg_path.open('r') as fd:
         rcParams.load_config(fd)

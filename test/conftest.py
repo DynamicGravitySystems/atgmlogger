@@ -6,7 +6,7 @@ import serial
 import threading
 from pathlib import Path
 
-from atgmlogger import _ConfigParams
+from atgmlogger.runconfig import _ConfigParams
 from atgmlogger.dispatcher import Dispatcher
 
 

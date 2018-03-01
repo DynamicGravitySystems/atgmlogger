@@ -8,21 +8,20 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 
 """
 
-import sys
 import time
 import queue
 import logging
 import logging.config
 import threading
 from pathlib import Path
-# from pprint import pprint
 
 import serial
 
+from .runconfig import rcParams
 from .common import parse_args, decode
 from .dispatcher import Dispatcher
 from .plugins import load_plugin
-from . import VERBOSITY_MAP, APPLOG, rcParams
+from . import VERBOSITY_MAP, APPLOG, POSIX
 
 DATA_LVL = 75
 

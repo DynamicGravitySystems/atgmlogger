@@ -10,8 +10,7 @@ import subprocess
 from typing import Union
 from pathlib import Path
 
-from atgmlogger import APPLOG, __description__, __version__, VERBOSITY_MAP
-from atgmlogger import rcParams
+from . import *
 
 __all__ = ['parse_args', 'decode', 'convert_gps_time', 'timestamp_from_data',
            'set_system_time', 'Blink', 'Command']
@@ -67,6 +66,7 @@ def parse_args(argv=None):
     APPLOG.setLevel(log_level)
 
     # Set overrides from arguments
+    from .runconfig import rcParams
     if args.config:
         # This must come first as it will re-initialize the configuration class
         APPLOG.info("Reloading rcParams with config file: %s", args.config)
@@ -179,8 +179,7 @@ def timestamp_from_data(line) -> Union[float, None]:
 
 
 def set_system_time(timestamp):
-    platform = sys.platform
-    if platform == 'linux' or platform == 'linux2':
+    if POSIX:
         cmd = 'date +%s -s @{ts}'.format(ts=timestamp)
         output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
         return output
@@ -203,4 +202,3 @@ class Command:
     def __init__(self, cmd, **params):
         self.cmd = cmd
         self.params = params
-
