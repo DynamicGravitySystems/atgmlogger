@@ -10,20 +10,21 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 
 import time
 import queue
+import itertools
 import logging
 import logging.config
+import signal
 import threading
 from pathlib import Path
 
 import serial
 
 from .runconfig import rcParams
-from .common import parse_args, decode
 from .dispatcher import Dispatcher
 from .plugins import load_plugin
-from . import VERBOSITY_MAP, APPLOG, POSIX
+from . import APPLOG, POSIX
 
-DATA_LVL = 75
+ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
 
 
 class SerialListener:
@@ -78,7 +79,7 @@ class SerialListener:
 
         """
         while not self.exiting:
-            data = decode(self._handle.readline())
+            data = self.decode(self._handle.readline())
             if data is None or data == '':
                 continue
             self._queue.put_nowait(data)
@@ -87,72 +88,48 @@ class SerialListener:
                      "handle.")
         self._handle.close()
 
-
-def _expand_log_paths(base, prefix, key='filename'):
-    """Traverse a given 'base' dictionary searching for key (
-    default='filename'), and update the key's value by prepending the
-    specified prefix to it.
-    The base dictionary is recursively traversed (searching all
-    sub-dictionaries) to find any of the specified key.
-
-    Parameters
-    ----------
-    base : dict
-        The base dictionary to begin the recursive search and update.
-    prefix : str or Path
-
-    """
-    if not isinstance(prefix, Path):
-        prefix = Path(prefix)
-    for k, v in base.items():
-        if k == 'filename':
-            expanded = prefix.joinpath(v)
-            base[k] = str(expanded)
-        elif isinstance(v, dict):
-            _expand_log_paths(v, prefix, key=key)
-
-
-def _configure_logger():
-    log_dir = Path(rcParams['logging.logdir']) or \
-              Path('~').expanduser().joinpath('atgmlogger')
-
-    APPLOG.debug("Logging path set to: %s", str(log_dir))
-    if not log_dir.exists():
+    @staticmethod
+    def decode(bytearr, encoding='utf-8'):
+        if isinstance(bytearr, str):
+            return bytearr
         try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-        except (FileNotFoundError, OSError):
-            APPLOG.warning("Log directory %s could not be created, log files "
-                           "will be created in current directory (%s)",
-                           str(log_dir), str(Path().resolve()))
-            log_dir = Path()
-    try:
-        log_conf = rcParams['logging']
-        _expand_log_paths(log_conf, log_dir, key='filename')
+            raw = bytes([c for c in bytearr if c not in ILLEGAL_CHARS])
+            decoded = raw.decode(encoding, errors='ignore').strip('\r\n')
+        except AttributeError:
+            decoded = None
+        return decoded
 
-        logging.config.dictConfig(log_conf)
-        _log = logging.getLogger()
-    except (ValueError, TypeError, AttributeError, ImportError):
-        APPLOG.exception("Exception applying logging configuration, fallback "
-                         "configuration will be used.")
-        from logging.handlers import TimedRotatingFileHandler
-        _log = logging.getLogger()
-        fpath = str(log_dir.joinpath('gravity.dat').resolve())
-        data_hdlr = TimedRotatingFileHandler(fpath, when='D', interval=7,
-                                             encoding='utf-8', delay=True,
-                                             backupCount=8)
-        _log.addHandler(data_hdlr)
-        _log.setLevel(DATA_LVL)
-    else:
-        APPLOG.info("Logging facility configured from rcParams")
-    return _log
+
+def _configure_applog():
+    logdir = Path(rcParams['logging.logdir'])
+    if not logdir.exists():
+        try:
+            logdir.mkdir(parents=True, mode=0o750)
+        except (FileNotFoundError, OSError):
+            APPLOG.warning("Log directory could not be created, log "
+                           "files will be output to current directory (%s).",
+                           str(Path().resolve()))
+            logdir = Path()
+
+    from logging.handlers import WatchedFileHandler
+    applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
+                                     encoding='utf-8')
+    applog_hdlr.setFormatter(logging.Formatter("%(levelname)-8s::%(asctime)s - "
+                                               "(%(funcName)s) %(message)s",
+                                               datefmt="%Y-%m-%d::%H:%M:%S"))
+    APPLOG.addHandler(applog_hdlr)
+    APPLOG.debug("Application log configured, log path: %s", str(logdir))
 
 
 def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
+    """Loads plugin and returns instance of Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
 
     # Explicitly register the DataLogger 'plugin'
-    from .logger import DataLogger
-    dispatcher.register(DataLogger)
+    from .logger import DataLogger, SimpleLogger
+    # dispatcher.register(DataLogger)
+    dispatcher.register(SimpleLogger, logfile=Path(
+        '/var/log/atgmlogger/gravdata.dat'))
 
     plugins = plugins or rcParams['plugins']
     if plugins is not None:
@@ -178,13 +155,25 @@ def _get_handle():
     return hdl
 
 
-def run(listener=None, handle=None, dispatcher=None):
+def atgmlogger(args, listener=None, handle=None, dispatcher=None):
+    """
+
+    Parameters
+    ----------
+    args : Namespace
+        Namespace containing parsed commandline arguments.
+    listener
+    handle
+    dispatcher
+
+    Returns
+    -------
+
+    """
     # Init Performance Counter
     t_start = time.perf_counter()
 
-    args = parse_args()
-    APPLOG.setLevel(VERBOSITY_MAP.get(args.verbose, logging.DEBUG))
-    _configure_logger()
+    _configure_applog()
 
     if listener is None:
         listener = SerialListener(handle or _get_handle())
@@ -197,12 +186,17 @@ def run(listener=None, handle=None, dispatcher=None):
         APPLOG.debug("Initialization time: %.4f", t_end - t_start)
 
     try:
+        if POSIX:
+            # Listen for SIGHUP to tell logger that files have been rotated.
+            # Note: Signal handler must be defined in main thread
+            signal.signal(signal.SIGHUP,
+                          lambda sig, frame: dispatcher.log_rotate())
         dispatcher.start()
         listener.listen()
     except KeyboardInterrupt:
         APPLOG.info("Keyboard Interrupt intercepted, initiating clean exit.")
         listener.exit()
-        dispatcher.exit(join=True)
+        dispatcher.exit(join=False)
         APPLOG.debug("Dispatcher exited.")
 
     return 0

@@ -21,7 +21,7 @@ setup(
     zip_safe=True,
     entry_points={
         'console_scripts': [
-            'atgmlogger = atgmlogger.atgmlogger:run'
+            'atgmlogger = atgmlogger.__main__:entry_point'
         ]
     },
     setup_requires=['pytest-runner'],

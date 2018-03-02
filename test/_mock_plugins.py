@@ -27,8 +27,8 @@ class BasicModule(PluginInterface):
         self.accumulator = []
 
     @staticmethod
-    def consumes(item):
-        return isinstance(item, SimplePacket)
+    def consumer_type():
+        return {SimplePacket}
 
     def run(self):
         while not self.exiting:
@@ -53,8 +53,8 @@ class ComplexModule(PluginInterface):
         self.count = 0
 
     @staticmethod
-    def consumes(item):
-        return isinstance(item, SimplePacket)
+    def consumer_type():
+        return {SimplePacket}
 
     def run(self):
         while not self.exiting:
@@ -78,8 +78,8 @@ class SimpleOneshot(PluginInterface):
         self.data = []
 
     @staticmethod
-    def consumes(item) -> bool:
-        return isinstance(item, str)
+    def consumer_type():
+        return {str}
 
     def run(self):
         while not self.exiting:

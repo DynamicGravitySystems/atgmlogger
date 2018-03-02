@@ -2,10 +2,9 @@
 
 import logging
 import time
-import queue
 
-from ..common import Blink
 from . import PluginInterface
+from ..dispatcher import Blink
 
 _APPLOG = logging.getLogger(__name__)
 
@@ -32,13 +31,14 @@ class GPIOListener(PluginInterface):
         self.usb_pin = 13
 
     @staticmethod
-    def consumes(item):
-        return isinstance(item, Blink)
+    def consumer_type():
+        return {Blink}
 
     def configure(self, **options):
         _APPLOG.debug("Configuring GPIO with options: {}".format(options))
         super().configure(**options)
         _mode = self.modes[getattr(self, 'mode', 'board')]
+        gpio.setwarnings(False)
         gpio.setmode(_mode)
 
         self.outputs = [getattr(self, pin) for pin in ['data_pin', 'usb_pin']
@@ -46,29 +46,43 @@ class GPIOListener(PluginInterface):
         for pin in self.outputs:
             gpio.setup(pin, gpio.OUT)
 
+    def _get_pin(self, name: str) -> int:
+        if name.lower().startswith('data'):
+            return self.data_pin
+        elif name.lower().startswith('usb'):
+            return self.usb_pin
+
     def _blink(self, blink):
-        if blink.led not in self.outputs:
+        if isinstance(blink.led, str):
+            led_id = self._get_pin(blink.led)
+        else:
+            led_id = blink.led
+        if led_id not in self.outputs:
             return
         if HAVE_GPIO:
-            gpio.output(blink.led, True)
+            gpio.output(led_id, True)
             time.sleep(blink.frequency)
-            gpio.output(blink.led, False)
+            gpio.output(led_id, False)
             time.sleep(blink.frequency)
 
     def run(self):
+        # TODO: How to trigger constant blink until stopped, while allowing
+        # queue events to still be processed.
+        # Maybe a separate thread for each output LED, which can be
+        # controlled via external signals/calls
         if not HAVE_GPIO:
             _APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
                             self.__class__.__name__)
             return
 
         while not self.exiting:
-            try:
-                blink = self.get()
-            except queue.Empty:
+            blink = self.get()
+            if blink is None:
+                self.task_done()
                 continue
             else:
                 self._blink(blink)
-                self.queue.task_done()
+                self.task_done()
 
         for pin in self.outputs:
             gpio.output(pin, False)

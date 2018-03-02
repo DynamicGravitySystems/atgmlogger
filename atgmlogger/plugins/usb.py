@@ -123,6 +123,10 @@ class RemovableStorageHandler(PluginInterface):
     def consumes(cls, item):
         return isinstance(item, str)
 
+    @staticmethod
+    def consumer_type():
+        return {str}
+
     def __init__(self):
         super().__init__()
 

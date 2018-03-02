@@ -10,6 +10,10 @@ class TestPlugin:
         super().__init__()
         self._smtp = None
 
+    @staticmethod
+    def consumer_type():
+        return {str}
+
     def consumes(self, item):
         return isinstance(item, str)
 

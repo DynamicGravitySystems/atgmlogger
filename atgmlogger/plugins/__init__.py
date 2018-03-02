@@ -12,17 +12,22 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     options = []
     oneshot = False
 
-    def __init__(self):
-        super().__init__(name=self.__class__.__name__)
+    def __init__(self, daemon=False):
+        super().__init__(name=self.__class__.__name__, daemon=daemon)
         self._exitSig = threading.Event()
         self._queue = queue.Queue()
         self._configured = False
         self._context = None
 
+    def consumes(self, item) -> bool:
+        return type(item) in self.consumer_type()
+
     @staticmethod
     @abc.abstractmethod
-    def consumes(item) -> bool:
-        return False
+    def consumer_type() -> set:
+        """Return an iterable (set, list, tuple, dict) with item types that this
+        plugin consumes e.g. str, list, Command etc."""
+        return {None}
 
     @classmethod
     def condition(cls, *args):

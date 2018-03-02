@@ -17,27 +17,31 @@ class _ConfigParams:
     """Centralize the loading and dissemination of configuration parameters"""
     cfg_name = '.atgmlogger'
     cfg_paths = [Path('~').expanduser().joinpath(cfg_name),
-                 Path('/opt/atgmlogger').joinpath(cfg_name),
-                 Path('/etc/atgmlogger').joinpath(cfg_name)]
+                 Path('/etc/atgmlogger').joinpath(cfg_name),
+                 Path('/opt/atgmlogger').joinpath(cfg_name)]
 
     def __init__(self, config: Dict=None, path=None):
         self._default = config or dict()
         self._working = copy.deepcopy(config) or dict()
         self._path = None
-
+        search_paths = copy.copy(self.cfg_paths)
         if path is not None:
-            with Path(path).open('r') as fd:
-                self.load_config(fd)
+            search_paths.insert(0, Path(path))
 
         if not self._default:
-            for cfg in self.cfg_paths:  # type: Path
+            for cfg in search_paths:  # type: Path
                 if cfg.exists():
                     with cfg.open('r') as fd:
                         self.load_config(fd)
-                    break
+                    if self._default:
+                        APPLOG.info("Loaded configuration from: %s",
+                                    str(self._path))
+                        break
             else:
                 APPLOG.warning("No configuration file could be located, "
                                "attempting to load default.")
+                APPLOG.warning("Execute with --install option to install "
+                               "default configuration files.")
                 try:
                     import pkg_resources as pkg
                     rawfd = pkg.resource_stream(_base + '.install',
@@ -48,7 +52,7 @@ class _ConfigParams:
                 except IOError:
                     APPLOG.exception("Error loading default configuration.")
                 else:
-                    APPLOG.info("Successfully loaded fallback configuration.")
+                    APPLOG.info("Successfully loaded default configuration.")
 
     def load_config(self, descriptor):
         try:
@@ -59,7 +63,6 @@ class _ConfigParams:
         self._path = Path(descriptor.name)
         self._default = cfg
         self._working = copy.deepcopy(cfg)
-        APPLOG.info("New rcParams configuration loaded.")
 
     def get_default(self, key):
         base = self._default

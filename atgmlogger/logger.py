@@ -2,13 +2,12 @@
 
 import io
 import logging
-import datetime
-import threading
 from pathlib import Path
+from io import TextIOBase
 
 from atgmlogger import APPLOG
 from .plugins import PluginInterface
-from .common import Command
+from .dispatcher import Command
 
 __all__ = ['DataLogger', 'SimpleLogger']
 DATA_LVL = 75
@@ -26,6 +25,7 @@ def level_filter(level):
     return _filter
 
 
+# Pending deprecation/removal
 class DataLogger(PluginInterface):
     """
     DataLogger conforms to the PluginInterface spec but is not really
@@ -60,6 +60,7 @@ class DataLogger(PluginInterface):
                     self.logrotate()
                 else:
                     self._logger.log(DATA_LVL, item)
+                    self.context.blink()
             except FileNotFoundError:
                 APPLOG.error("Log handler file path not found, data will not "
                              "be saved.")
@@ -83,35 +84,48 @@ class SimpleLogger(PluginInterface):
         self._hdl = None  # type: io.TextIOBase
         self._params = dict(mode='w+', buffering=1, encoding='utf-8',
                             newline='\n')
-        self._lock = threading.Lock()
 
     @staticmethod
     def consumes(item):
         return isinstance(item, str) or isinstance(item, Command)
 
-    def logrotate(self):
-        with self._lock:
-            APPLOG.debug("Performing logrotate")
-            if self._hdl is None:
-                return
+    @staticmethod
+    def consumer_type():
+        return {str, Command}
 
-            try:
-                self._hdl.flush()
-                self._hdl.close()
-            except IOError:
-                APPLOG.exception()
-                return
-            suffix = datetime.datetime.now().strftime('%Y%m%d-%H%M')
-            base = self.logfile.parent.resolve()
-            target = base.joinpath('{name}.{suffix}'
-                                   .format(name=self.logfile.name,
-                                           suffix=suffix))
-            self.logfile.rename(target)
-            self._hdl = self.logfile.open(**self._params)
+    def _get_fhandle(self):
+        self._hdl = self.logfile.open(**self._params)
+
+    def log_rotate(self):
+        """
+        Call this to notify the logger that logs may have been rotated by the
+        system.
+        Flush, close then reopen the handle.
+
+        Returns
+        -------
+
+        """
+        APPLOG.info("LogRotate signal received, re-opening log handle.")
+        if self._hdl is None:
+            return
+
+        try:
+            self._hdl.flush()
+            self._hdl.close()
+            self._hdl = None
+        except IOError:
+            APPLOG.exception()
+            return
+
+        self._get_fhandle()
+        APPLOG.debug("LogRotate completed without exception, handle opened "
+                     "on path %s", self._hdl.name)
 
     def run(self):
         try:
-            self._hdl = self.logfile.open(**self._params)
+            # self._hdl = self.logfile.open(**self._params)
+            self._get_fhandle()
         except IOError:
             APPLOG.exception("Error opening file for writing.")
             return
@@ -122,10 +136,12 @@ class SimpleLogger(PluginInterface):
                 if item is None:
                     self.queue.task_done()
                     continue
-                if isinstance(item, Command) and item.cmd == 'rotate':
-                    self.logrotate()
+                if isinstance(item, Command):
+                    if item.cmd == 'rotate':
+                        self.log_rotate()
                 else:
                     self._hdl.write(item + '\n')
+                    self.context.blink()
                     self.queue.task_done()
             except IOError:
                 APPLOG.exception()

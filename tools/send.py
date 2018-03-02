@@ -92,7 +92,7 @@ def send(handle, data: List, interval=1.0, count=None,
         except StopIteration:
             _log.info("Data source exhausted, {} lines sent.".format(SEND_COUNT))
             break
-        enc_line = line.encode(ENCODING)
+        enc_line = line.encode(ENCODING, errors='ignore')
         handle.write(enc_line)
         if copy_output is not None:
             try:

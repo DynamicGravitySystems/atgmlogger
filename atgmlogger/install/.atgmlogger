@@ -8,57 +8,7 @@
     "stopbits": 1
   },
   "logging": {
-    "version": 1,
-    "logdir": "/var/log/atgmlogger",
-    "formatters": {
-      "data_fmtr": {
-        "format": "%(message)s"
-      },
-      "applog_fmtr": {
-        "format": "%(levelname)s::%(asctime)s (%(funcName)s) - %(message)s",
-        "datefmt": "%Y-%m-%d - %H:%M:%S"
-      }
-    },
-    "filters": {
-      "data_filter": {
-        "()": "atgmlogger.logger.level_filter",
-        "level": 75
-      }
-    },
-    "handlers": {
-      "data_hdlr": {
-        "class": "logging.handlers.TimedRotatingFileHandler",
-        "formatter": "data_fmtr",
-        "filename": "gravdata.dat",
-        "when": "W6",
-        "backupCount": 7,
-        "encoding": "utf-8",
-        "level": 60
-      },
-      "debug_hdlr": {
-        "class": "logging.StreamHandler",
-        "formatter": "applog_fmtr",
-        "stream": "ext://sys.stderr",
-        "level": "DEBUG",
-        "filters": ["data_filter"]
-      },
-      "applog_hdlr": {
-        "class": "logging.handlers.TimedRotatingFileHandler",
-        "formatter": "applog_fmtr",
-        "filename": "application.log",
-        "when": "MIDNIGHT",
-        "interval": 7,
-        "backupCount": 52,
-        "encoding": "utf-8",
-        "level": "INFO",
-        "filters": ["data_filter"]
-      }
-    },
-    "root": {
-      "level": "DEBUG",
-      "handlers": ["data_hdlr", "debug_hdlr", "applog_hdlr"],
-      "propogate": true
-    }
+    "logdir": "/var/log/atgmlogger"
   },
   "usb": {
     "mount": "/media/removable",

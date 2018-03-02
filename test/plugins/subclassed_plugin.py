@@ -12,8 +12,8 @@ class SubclassPlugin(PluginInterface):
         super().__init__()
 
     @staticmethod
-    def consumes(item):
-        return True
+    def consumer_type():
+        return {str}
 
     def run(self):
         print("Running %s" % __class__.__name__)
