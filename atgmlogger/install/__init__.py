@@ -140,6 +140,7 @@ def install(verbose=True):
     sys_command('systemctl daemon-reload')
     sys_command('systemctl enable media-removable.mount')
     sys_command('systemctl enable atgmlogger.service')
+    _log.critical("Installation of atgmlogger completed successfully.")
     return 0
 
 

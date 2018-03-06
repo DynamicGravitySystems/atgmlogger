@@ -5,12 +5,11 @@ import queue
 import threading
 from importlib import import_module
 
-__all__ = ['PluginInterface', 'load_plugin']
+__all__ = ['PluginInterface', 'PluginDaemon', 'load_plugin']
 
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
     options = []
-    oneshot = False
 
     def __init__(self, daemon=False):
         super().__init__(name=self.__class__.__name__, daemon=daemon)
@@ -101,6 +100,70 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         self._queue = value
 
 
+class PluginDaemon(threading.Thread, metaclass=abc.ABCMeta):
+    options = {}
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is not None and cls._instance.is_alive():
+            raise TypeError("Daemon already exists.")
+        else:
+            if cls._instance: del cls._instance
+            cls._instance = super().__new__(cls)
+            return cls._instance
+
+    def __init__(self, **kwargs):
+        super().__init__(daemon=True)
+        self._context = kwargs.get('context', None)
+        self._data = kwargs.get('data', None)
+
+    @property
+    def data(self):
+        return self._data
+
+    # For compatibility with PluginInterface
+    def put(self, item):
+        self._data = item
+
+    @property
+    def context(self):
+        return self._context
+
+    @context.setter
+    def context(self, value):
+        self._context = value
+
+    # For compatibility with PluginInterface
+    def set_context(self, value):
+        self._context = value
+
+    @classmethod
+    @abc.abstractmethod
+    def condition(cls, item=None):
+        if cls._instance is not None and cls._instance.is_alive():
+            return False
+        else:
+            return True
+
+    @classmethod
+    def configure(cls, **options):
+        for key, value in {str(k).lower(): v for k, v in options.items()
+                           if k in cls.options}.items():
+            if isinstance(cls.options, dict):
+                dtype = cls.options[key]
+                if not isinstance(value, dtype):
+                    try:
+                        value = dtype(value)
+                    except TypeError:
+                        print("TypeError: invalid type provided for key: {}, "
+                              "should be {}".format(key, dtype))
+            setattr(cls, key, value)
+
+    @abc.abstractmethod
+    def run(self):
+        pass
+
+
 def load_plugin(name, path=None, register=True, **plugin_params):
     """
     Load a runtime plugin from either the default module path
@@ -147,7 +210,8 @@ def load_plugin(name, path=None, register=True, **plugin_params):
         klass = getattr(plugin, klass)
     if klass is None:
         raise ImportError("__plugin__ is None in plugin module %s." % name)
-    if not issubclass(klass, PluginInterface):
+    # TODO: fix checks/casting of daemon
+    if not issubclass(klass, PluginInterface) and not issubclass(klass, PluginDaemon):
         klass = type(name, (klass, PluginInterface), {})
     if register:
         from ..dispatcher import Dispatcher

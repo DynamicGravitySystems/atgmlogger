@@ -22,7 +22,7 @@ import serial
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
 from .plugins import load_plugin
-from . import APPLOG, POSIX
+from . import APPLOG, POSIX, LOG_FMT, DATE_FMT
 
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
 
@@ -114,9 +114,7 @@ def _configure_applog():
     from logging.handlers import WatchedFileHandler
     applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
                                      encoding='utf-8')
-    applog_hdlr.setFormatter(logging.Formatter("%(levelname)-8s::%(asctime)s - "
-                                               "(%(funcName)s) %(message)s",
-                                               datefmt="%Y-%m-%d::%H:%M:%S"))
+    applog_hdlr.setFormatter(logging.Formatter(LOG_FMT, datefmt=DATE_FMT))
     APPLOG.addHandler(applog_hdlr)
     APPLOG.debug("Application log configured, log path: %s", str(logdir))
 
@@ -126,9 +124,9 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     dispatcher = Dispatcher(collector=collector)
 
     # Explicitly register the DataLogger 'plugin'
-    from .logger import DataLogger, SimpleLogger
+    from .logger import DataLogger, DataLogger
     # dispatcher.register(DataLogger)
-    dispatcher.register(SimpleLogger, logfile=Path(
+    dispatcher.register(DataLogger, logfile=Path(
         '/var/log/atgmlogger/gravdata.dat'))
 
     plugins = plugins or rcParams['plugins']

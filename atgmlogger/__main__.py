@@ -53,14 +53,14 @@ def parse_args(argv=None):
     if args.install:
         try:
             from . import install
-            sys.exit(install.install(args.verbose > 0))
+            sys.exit(install.install(args.verbose > 0 or args.debug))
         except (ImportError, OSError):
             APPLOG.exception("Exception occurred trying to install system "
                              "files.")
     elif args.uninstall:
         try:
             from . import install
-            sys.exit(install.uninstall(args.verbose > 0))
+            sys.exit(install.uninstall(args.verbose > 0 or args.debug))
         except (ImportError, OSError):
             APPLOG.exception("Exception occurred uninstalling system files.")
 

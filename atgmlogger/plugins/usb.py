@@ -9,13 +9,13 @@ import shlex
 import shutil
 import functools
 import subprocess
-from contextlib import contextmanager
-from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from atgmlogger import APPLOG
-from . import PluginInterface
+from pprint import pprint
+
+from .. import APPLOG
+from . import PluginDaemon
 
 __plugin__ = 'RemovableStorageHandler'
 CHECK_PLATFORM = True
@@ -92,43 +92,27 @@ def _filehook(pattern):
         wrapper.filehook = re.compile(pattern)
         return wrapper
     return inner
+# TODO: Do away with these decorators ^
 
 
-class RemovableStorageHandler(PluginInterface):
-    options = ['mountpath', 'logdir', 'patterns']
-    oneshot = True
-    _runlock = False
+class RemovableStorageHandler(PluginDaemon):
+    options = {'mountpath': Path, 'logdir': Path, 'patterns': list}
+    # options = ['mountpath', 'logdir', 'patterns']
 
     mountpath = Path('/media/removable')
-    logdir = None
-    patterns = ['*.dat', '*.log', '*.log.*']
-
-    @classmethod
-    @contextmanager
-    def lock(cls):
-        if cls._runlock:
-            yield False
-        else:
-            cls._runlock = True
-            yield True
-            cls._runlock = False
+    logdir = Path('/var/log/atgmlogger')
+    patterns = ['*.dat', '*.log', '*.gz']
 
     @classmethod
     def condition(cls, *args):
-        if not cls._runlock:
+        if super().condition():
             return os.path.ismount(str(cls.mountpath))
-        return False
+        else:
+            return False
 
-    @classmethod
-    def consumes(cls, item):
-        return isinstance(item, str)
-
-    @staticmethod
-    def consumer_type():
-        return {str}
-
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        APPLOG.debug("Initializing RSH")
+        super().__init__(**kwargs)
 
         self._current_path = None
         self._last_copy_time = None
@@ -139,47 +123,37 @@ class RemovableStorageHandler(PluginInterface):
             # Inspect for decorated methods
             if hasattr(member, 'runhook'):
                 self._run_hooks.append(self.__getattribute__(member.__name__))
+                APPLOG.debug("Appending {} to runhooks".format(member))
             elif hasattr(member, 'filehook'):
                 self._file_hooks.append((member.filehook,
                                         self.__getattribute__(member.__name__)))
+                APPLOG.debug("Appending {} to filehooks".format(member))
 
     def run(self):
         APPLOG.debug("Starting USB Handler thread")
+        if not self.logdir.is_dir():
+            self.logdir = self.logdir.parent
         if not os.path.ismount(self.mountpath):
             APPLOG.error("{path} is not mounted or is not a valid mount point."
                          .format(path=self.mountpath))
             return
 
-        # TODO: This will be taken over by dispatcher (the locking mechanism)
-        with self.lock() as locked:
-            if not locked:
-                return
+        self.context.blink_until(led='usb')
 
-            for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
-                result = functor()
-                APPLOG.debug("USB Function {} returned: {}"
-                             .format(functor, result))
+        for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
+            result = functor()
+            APPLOG.debug("USB Function {} returned: {}"
+                         .format(functor, result))
 
-            try:
-                os.sync()
-            except AttributeError:
-                # os.sync is not available on Windows
-                pass
-            finally:
-                umount(self.mountpath)
-
-    @classmethod
-    def configure(cls, **options):
-        for key, value in options.items():
-            lkey = str(key).lower()
-            if lkey in cls.options:
-                setattr(cls, lkey, value)
-        if 'mountpath' in options:
-            cls.mountpath = Path(options['mountpath'])
-        if 'logdir' in options:
-            cls.log_dir = Path(options['logdir'])
-            if not cls.log_dir.is_dir():
-                cls.log_dir = cls.log_dir.parent
+        try:
+            os.sync()
+        except AttributeError:
+            # os.sync is not available on Windows
+            pass
+        finally:
+            umount(self.mountpath)
+        self.context.blink_until(led='usb')
+        APPLOG.debug("Returning from USB Handler")
 
     @_runhook(priority=1)
     def copy_logs(self):
@@ -188,7 +162,7 @@ class RemovableStorageHandler(PluginInterface):
         copy_size = 0   # Accumulated size of logs in bytes
 
         for pattern in self.patterns:
-            file_list.extend(self.log_dir.glob(pattern))
+            file_list.extend(self.logdir.glob(pattern))
 
         for file in file_list:
             copy_size += file.stat().st_size
@@ -208,7 +182,10 @@ class RemovableStorageHandler(PluginInterface):
                            "than free-space on device.")
 
         dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
-        dest_dir.mkdir()
+        try:
+            dest_dir.mkdir()
+        except FileExistsError:
+            APPLOG.warning("Copy Destination Directory already exists.")
 
         for srcfile in file_list:
             fname = srcfile.name
@@ -241,22 +218,35 @@ class RemovableStorageHandler(PluginInterface):
                 APPLOG.debug("Matched on pattern: %s", pattern.pattern)
                 if run:
                     path = self.mountpath.joinpath(match.group())
-                    runner(path)
+                    try:
+                        runner(path)
+                    except (AttributeError, TypeError):
+                        APPLOG.exception("Exception executing watched file "
+                                         "hook.")
             else:
                 APPLOG.debug("No match on pattern: %s", pattern.pattern)
         return matched
 
     @_filehook(r'clear(\.txt)?')
-    def clear_logs(self, path: Path):
+    def clear_logs(self, match):
         APPLOG.info("Clearing old application logs and gravity data files.")
-        with path.open('r') as fd:
+        with match.open('r') as fd:
             contents = fd.read()
-            if contents.startswith('archive'):
-                APPLOG.info("Rotating and archiving logs.")
-                self.context.logrotate()
+            # if contents.startswith('archive'):
+            #     APPLOG.info("Rotating and archiving logs.")
+            #     self.context.logrotate()
 
+        for file in self.logdir.iterdir():  # type: Path
+            if file.is_file() and file.suffix in ['.gz']:
+                APPLOG.warning("Deleting archived file: %s", file.name)
+                try:
+                    os.remove(str(file.resolve()))
+                except OSError:
+                    APPLOG.exception()
+
+        # Remove the trigger file to prevent accidents
         try:
-            os.remove(str(path.resolve()))
+            os.remove(str(match.resolve()))
         except OSError:
             pass
 
@@ -269,10 +259,12 @@ class RemovableStorageHandler(PluginInterface):
                          "runner.")
             return
 
-        commands = ['uptime', 'top -b -n1', 'df -H', 'free -h', 'dmesg']
+        commands = ['uptime', 'vcgencmd measure_temp', 'top -b -n1', 'df -H',
+                    'free -h', 'dmesg']
         # TODO: Put formatted date
-        # today = datetime
-        result = 'Diagnostic Results ({dt}):\n\n'.format(dt='TodayPlaceholder')
+        dt = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(
+            time.time()))
+        result = 'Diagnostic Results ({dt}):\n\n'.format(dt=dt)
         for cmd in commands:
             result += 'Command: %s\n' % cmd
             try:
@@ -285,3 +277,27 @@ class RemovableStorageHandler(PluginInterface):
 
         with match.open('w+') as fd:
             fd.write(result)
+
+    @_filehook(r'get(_)?conf(ig)?(\.txt)?')
+    def copy_config(self, match):
+        try:
+            from ..runconfig import rcParams
+            with rcParams.path.open('r') as cfg:
+                cfg_data = cfg.read()
+
+            with match.open('w+') as fd:
+                fd.write(cfg_data)
+        except (IOError, OSError):
+            APPLOG.exception()
+
+    @_filehook(r'\bconf(ig)?\.(json|txt|cfg)')
+    def set_config(self, match):
+        from ..runconfig import rcParams
+        base_path = rcParams.path
+        with open(match, 'r') as cfg:
+            APPLOG.warning("Loading new configuration from USB device path: "
+                           "%s", match)
+            rcParams.load_config(cfg)
+
+        rcParams.dump(path=base_path, exist_ok=True)
+

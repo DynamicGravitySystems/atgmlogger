@@ -6,10 +6,10 @@ import datetime
 import subprocess
 from typing import Union
 
-from . import PluginInterface
+from . import PluginDaemon
 from .. import APPLOG, POSIX
 
-__plugin__ = 'TimeSyncSleeper'
+__plugin__ = 'TimeSyncDaemon'
 
 
 def convert_gps_time(gpsweek: int, gpsweekseconds: float) -> float:
@@ -105,98 +105,41 @@ def set_system_time(timestamp):
         return None
 
 
-class TimeSync(PluginInterface):
+class TimeSyncDaemon(PluginDaemon):
     options = ['interval', 'timetravel']
-    oneshot = True
+    interval = 1000
     _tick = -1
-    interval = 10000
-    timetravel = False  # Allow system time to be set to a date in the past
+    timetravel = False
 
     @classmethod
-    def condition(cls, line):
+    def condition(cls, item=None):
+        if not isinstance(item, str):
+            return False
         cls._tick += 1
-        return cls._tick % cls.interval == 0
-
-    @staticmethod
-    def consumer_type():
-        return {str}
-
-    def __init__(self):
-        super().__init__()
-
-    def run(self):
-        data = self.get(block=True, timeout=None)
-        try:
-            APPLOG.debug("Trying to set system time from data.")
-            ts = timestamp_from_data(data)
-            if ts is not None:
-                if not self.timetravel and (ts > datetime.datetime.now()
-                                            .timestamp()):
-                    set_system_time(ts)
-                else:
-                    APPLOG.warning("Timestamp from meter is in the past: "
-                                   "%.2f", ts)
-            else:
-                APPLOG.debug("Timestamp could not be extracted from data.")
-                raise ValueError("Invalid System Time Specified")
-        except ValueError:  # TODO: Be more specific
-            pass
+        if super().condition(item):
+            return cls._tick % cls.interval == 0
         else:
-            APPLOG.debug("System time set to: %.2f", ts)
-        finally:
-            APPLOG.debug("TimeSync plugin exited.")
-            self.queue.task_done()
+            return False
 
-    @classmethod
-    def configure(cls, **options):
-        for key, value in options.items():
-            lkey = str(key).lower()
-            if lkey in cls.options:
-                if isinstance(cls.options, dict):
-                    dtype = cls.options[lkey]
-                    if not isinstance(value, dtype):
-                        print("Invalid option value provided for key: ", key)
-                        continue
-                setattr(cls, lkey, value)
-
-
-class TimeSyncSleeper(PluginInterface):
-    """This isn't a huge improvement over the daemon, in terms of perceived
-    cpu usage on the Raspberry Pi Nano, though it does reduce memory
-    consumption from approx 3.4% to 2.8% (probably because we aren't
-    maintaining another queue in this plugin). """
-
-    options = ['interval', 'timetravel']
-
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.interval = 1000
-        self.timetravel = False
-        self._lastvalue = None
-
-    @staticmethod
-    def consumer_type():
-        return {str}
-
-    def put(self, item):
-        self._lastvalue = item
+    def _valid_time(self, timestamp):
+        if not self.timetravel and timestamp > time.time():
+            return True
+        else:
+            return False
 
     def run(self):
-        while not self.exiting:
-            if self._lastvalue is None:
-                continue
-            try:
-                ts = timestamp_from_data(self._lastvalue)
-                if ts is not None:
-                    if not self.timetravel and (ts > datetime.datetime.now()
-                                                .timestamp()):
-                        set_system_time(ts)
-                    else:
-                        APPLOG.warning("Timestamp is from the past, skipping "
-                                       "set_system_time.")
-            except ValueError:
-                pass
-            APPLOG.debug("Sleeping for %d seconds", self.interval)
-            time.sleep(self.interval)
+        if not self.data:
+            raise ValueError("TimeSyncDaemon has no data set.")
 
+        try:
+            ts = timestamp_from_data(self.data)
+            if ts is not None and self._valid_time(ts):
+                APPLOG.debug("Attempting to set system time with timestamp: "
+                             "%.2f", ts)
+                set_system_time(ts)
+            else:
+                APPLOG.warning("Invalid timestamp extracted from data.")
+        except ValueError:
+            pass
 
+        APPLOG.debug("TimeSyncDaemon exiting.")

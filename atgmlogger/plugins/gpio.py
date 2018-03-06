@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import threading
 import time
 
 from . import PluginInterface
@@ -17,6 +18,31 @@ except (ImportError, RuntimeError):
     __plugin__ = None
 
 
+class _BlinkUntil(threading.Thread):
+    def __init__(self, delegate, blink, duration=None):
+        super().__init__(name=self.__class__.__name__)
+        self._exit_sig = threading.Event()
+        self._delegate = delegate
+        self._blink = blink
+        self.led = blink.led
+        self._duration = duration or 0
+
+    @property
+    def exiting(self):
+        return self._exit_sig.is_set()
+
+    def exit(self):
+        self._exit_sig.set()
+
+    def run(self):
+        while not self.exiting:
+            self._duration -= 1
+            if self._duration == 0:
+                break
+            else:
+                self._delegate(self._blink)
+
+
 class GPIOListener(PluginInterface):
     options = ['mode', 'data_pin', 'usb_pin']
 
@@ -30,12 +56,14 @@ class GPIOListener(PluginInterface):
         self.data_pin = 11
         self.usb_pin = 13
 
+        self._blink_until_sig = threading.Event()
+
     @staticmethod
     def consumer_type():
         return {Blink}
 
     def configure(self, **options):
-        _APPLOG.debug("Configuring GPIO with options: {}".format(options))
+        # _APPLOG.debug("Configuring GPIO with options: {}".format(options))
         super().configure(**options)
         _mode = self.modes[getattr(self, 'mode', 'board')]
         gpio.setwarnings(False)
@@ -65,6 +93,10 @@ class GPIOListener(PluginInterface):
             gpio.output(led_id, False)
             time.sleep(blink.frequency)
 
+    def _blink_until_stopped(self, blink):
+        while not self._blink_until_sig.is_set():
+            self._blink(blink)
+
     def run(self):
         # TODO: How to trigger constant blink until stopped, while allowing
         # queue events to still be processed.
@@ -75,11 +107,28 @@ class GPIOListener(PluginInterface):
                             self.__class__.__name__)
             return
 
+        subthreads = dict()
+
         while not self.exiting:
             blink = self.get()
             if blink is None:
                 self.task_done()
                 continue
+            elif blink.until_stopped:
+                if blink.led in subthreads:
+                    # then stop the continuous blink
+                    self._blink_until_sig.set()
+                    thread = subthreads[blink.led]
+                    thread.join()
+                    del subthreads[blink.led]
+                    self._blink_until_sig.clear()
+                else:
+                    # start a new continuous blink
+                    worker = threading.Thread(target=self._blink_until_stopped,
+                                              args=[blink])
+                    worker.start()
+                    subthreads[blink.led] = worker
+                    del worker
             else:
                 self._blink(blink)
                 self.task_done()

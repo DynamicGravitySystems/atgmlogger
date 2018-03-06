@@ -3,7 +3,7 @@
 import pytest
 import datetime
 from pathlib import Path
-from atgmlogger.logger import SimpleLogger
+from atgmlogger.logger import DataLogger
 
 
 LINE = "$UW,81242,-1948,557,4807924,307,872,204,6978,7541,-70,305,266," \
@@ -22,7 +22,7 @@ def test_simple_logger(tmpdir):
     # print("Logging test_dir: ", test_dir)
     # print("Initial grav file: ", log_file)
 
-    logger = SimpleLogger()
+    logger = DataLogger()
     logger.set_context(MockAppContext())
     _params = dict(logfile=log_file)
     logger.configure(**_params)
@@ -52,7 +52,7 @@ def test_logger_rotate(tmpdir):
     test_dir = Path(str(tmpdir.mkdir('logs')))
     log_file = test_dir.joinpath('gravdata.dat')
 
-    logger = SimpleLogger()
+    logger = DataLogger()
     _params = dict(logfile=log_file)
     logger.configure(**_params)
 
@@ -86,8 +86,3 @@ def test_logger_rotate(tmpdir):
     with log_file.open('r') as fd:
         for i, line in enumerate(fd):
             assert accumulator[rot_idx+i] == line.strip()
-
-
-
-
-

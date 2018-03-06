@@ -55,20 +55,41 @@ class _ConfigParams:
                     APPLOG.info("Successfully loaded default configuration.")
 
     def load_config(self, descriptor):
+        # TODO: Add error action, if we already have config don't mutate it
+        # on fail
         try:
             cfg = json.load(descriptor)
         except json.JSONDecodeError:
             APPLOG.exception("JSON Exception decoding: %s", descriptor.name)
-            cfg = dict()
+            cfg = self._default
         self._path = Path(descriptor.name)
         self._default = cfg
         self._working = copy.deepcopy(cfg)
+        if cfg:
+            APPLOG.info("Loaded Configuration from %s", str(self._path))
 
     def get_default(self, key):
         base = self._default
         for part in key.split('.'):
             base = base.get(part, None)
         return base or None
+
+    def dump(self, path: Path=None, overrides=False, exist_ok=False):
+        # TODO: Implement backup of config when path exists.
+        path = path or self.path
+        if not exist_ok and path.exists():
+            raise FileExistsError("Destination configuration already exists. "
+                                  "Set exist_ok=True to override.")
+        if overrides:
+            cfg = self._working
+        else:
+            cfg = self._default
+        try:
+            APPLOG.info("Writing current configuration to %s", str(path))
+            with path.open('w+') as fd:
+                json.dump(cfg, fd, indent=2)
+        except (IOError, OSError):
+            APPLOG.exception()
 
     @property
     def config(self):
@@ -77,7 +98,7 @@ class _ConfigParams:
         return self._working
 
     @property
-    def path(self):
+    def path(self) -> Path:
         return self._path
 
     def __getitem__(self, key: str):

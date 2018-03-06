@@ -5,30 +5,14 @@ import threading
 from weakref import WeakSet
 
 from . import APPLOG
+from .plugins import PluginInterface, PluginDaemon
 
-
-"""Premise: centralize and abstract the launching of threads and feeding of
-data to one location to allow for a modular/pluggable architecture.
-
-This could be a way to allow 'modules' to be loaded on demand, 
-a threadable class could be registered with the dispatcher, informing the 
-dispatcher of the types of objects it acts on, the dispatcher could then 
-push any objects matching the criteria into the appropriate registerd 
-classes internal queue.
-An interface of some sort would need to be defined to say what 
-characteristics/standards must be followed by any pluggable module.
-
-Registered modules could then be enabled/disabled on startup via 
-configuration file directives. Parameters could then be defined within 
-the module directive for the tweaking of the modules.
-
-"""
+POLL_INTV = 1
 
 
 class Dispatcher(threading.Thread):
-    _listeners = WeakSet()
-    _oneshots = set()
-    _locks = {}
+    _listeners = set()  # Registered Regular Plugins
+    _daemons = set()  # Registered Daemon Plugins
     _params = {}
     _runlock = threading.Lock()
 
@@ -36,18 +20,21 @@ class Dispatcher(threading.Thread):
     def register(cls, klass, **params):
         cls.acquire_lock()
         assert klass is not None
-        if klass not in cls._listeners and not klass.oneshot:
+        if issubclass(klass, PluginInterface) and klass not in cls._listeners:
             APPLOG.debug("Registering class {} in dispatcher.".format(klass))
             cls._listeners.add(klass)
             cls._params[klass] = params
-        elif klass not in cls._oneshots and klass.oneshot:
-            APPLOG.debug("Registering class as oneshot")
-            cls._oneshots.add(klass)
+        elif issubclass(klass, PluginDaemon) and klass not in cls._daemons:
+            APPLOG.debug("Registering class as Daemon")
+            cls._daemons.add(klass)
             try:
                 klass.configure(**params)
             except (AttributeError, TypeError):
-                pass
+                APPLOG.warning("Unable to configure daemon class: ", klass)
             cls._params[klass] = params
+        else:
+            APPLOG.info("Class %s is already registered in dispatcher.",
+                        str(klass))
         cls.release_lock()
         return klass
 
@@ -57,23 +44,23 @@ class Dispatcher(threading.Thread):
         if klass in cls._listeners:
             cls._listeners.remove(klass)
             del cls._params[klass]
-        elif klass in cls._oneshots:
-            cls._oneshots.remove(klass)
+        elif klass in cls._daemons:
+            cls._daemons.remove(klass)
 
     @classmethod
     def detach_all(cls):
         cls._listeners.clear()
-        cls._oneshots.clear()
+        cls._daemons.clear()
         cls._params = {}
 
     @classmethod
     def acquire_lock(cls, blocking=True):
-        APPLOG.debug("%s acquired runlock", cls)
+        APPLOG.debug("%s acquired lock.", cls)
         return cls._runlock.acquire(blocking=blocking)
 
     @classmethod
     def release_lock(cls):
-        APPLOG.debug("%s releasing runlock", cls)
+        APPLOG.debug("%s releasing lock.", cls)
         cls._runlock.release()
 
     def __init__(self, collector=None, sigExit=None):
@@ -81,11 +68,13 @@ class Dispatcher(threading.Thread):
         self.sigExit = sigExit or threading.Event()
         self._queue = collector or queue.Queue()
         self._threads = set()
-        self._daemons = WeakSet()
+        self._active_daemons = WeakSet()
+        self._context = AppContext(self.message_queue)
+        self._tick = 0
 
     @classmethod
     def __contains__(cls, item):
-        return item in cls._listeners or item in cls._oneshots
+        return item in cls._listeners or item in cls._daemons
 
     @property
     def message_queue(self):
@@ -97,12 +86,13 @@ class Dispatcher(threading.Thread):
     def run(self):
         self.acquire_lock(blocking=True)
         APPLOG.debug("Dispatcher run acquired runlock")
-        context = AppContext(self._queue)
-        consumers = {}  # Todo: Better name for this?
+
+        # Create perpetual listener threads
+        listener_map = {}  # Todo: Better name for this?
         for listener in self._listeners:
             try:
                 instance = listener()
-                instance.set_context(context)
+                instance.set_context(self._context)
                 instance.configure(**self._params[listener])
             except TypeError:
                 APPLOG.exception("Error instantiating listener.")
@@ -110,47 +100,42 @@ class Dispatcher(threading.Thread):
             else:
                 ctypes = instance.consumer_type()
                 for ctype in ctypes:
-                    consumer_set = consumers.setdefault(ctype, WeakSet())
+                    consumer_set = listener_map.setdefault(ctype, WeakSet())
                     consumer_set.add(instance)
 
                 instance.start()
                 self._threads.add(instance)
 
         while not self.sigExit.is_set():
-            item = self._queue.get(block=True, timeout=None)
-            if item is None:
-                self._queue.task_done()
-                continue
-            subscribers = consumers.get(type(item), None)
-            if subscribers is None:
-                # Maybe warn once when this happens.
-                pass
-
+            self._tick += 1
+            # TODO: Enable polling of plugins even if no data is incoming
+            # e.g. USB copy should still run even when no input stream
+            try:
+                item = self._queue.get(block=True, timeout=POLL_INTV)
+            except queue.Empty:
+                item = None
             else:
-                for subscriber in subscribers:
+                for subscriber in listener_map.get(type(item), set()):
                     subscriber.put(item)
-            self._queue.task_done()
+                self._queue.task_done()
 
-            # TODO: Consider adding an optional tick counter to run oneshots
-            # only every 5 ticks for example?
-            # Need to be careful about oneshots that depend on a tick count
-            # e.g. TimeSync - the interval might be multiplied if we do this.
-            for oneshot in self._oneshots:
-                # Optimization to only create the set if first condition passes
-                if oneshot.condition(item) and oneshot not in {type(daemon) for daemon in self._daemons}:
-                    daemon = oneshot()
-                    daemon.set_context(context)
-                    daemon.start()
-                    daemon.put(item)
-                    self._daemons.add(daemon)
-                    del daemon
+            # Check if a daemon needs to be spawned
+            for daemon in self._daemons:
+                if daemon.condition(item):
+                    try:
+                        inst = daemon(context=self._context, data=item)
+                        inst.start()
+                    except TypeError:
+                        APPLOG.exception()
+                else:
+                    continue
 
         self.release_lock()
 
     def _exit_threads(self, join=False):
         for thread in self._threads:
             thread.exit(join=join)
-        for daemon in self._daemons:
+        for daemon in self._active_daemons:
             daemon.exit(join=join)
 
     def exit(self, join=False):
@@ -176,10 +161,12 @@ class Dispatcher(threading.Thread):
 
 
 class Blink:
-    def __init__(self, led, priority=5, frequency=0.1):
+    def __init__(self, led, priority=5, frequency=0.1, continuous=False):
         self.led = led
         self.priority = priority
         self.frequency = frequency
+        self.duration = 0
+        self.until_stopped = continuous
 
     def __lt__(self, other):
         return self.priority < other.priority
@@ -195,15 +182,15 @@ class AppContext:
     def __init__(self, listener_queue):
         self._queue = listener_queue
 
-    # def blink(self, led='data', freq=0.1):
     def blink(self, led='data', freq=0.04):
         cmd = Blink(led=led, frequency=freq)
         self._queue.put_nowait(cmd)
 
-    def blink_until(self, until: threading.Event=None, led='usb', freq=0.1):
-        raise NotImplementedError("blink_until not implemented yet.")
-        until = until or threading.Event()
-        pass
+    def blink_until(self, until: threading.Event=None, led='usb', freq=0.03):
+        # TODO: Possibly allow caller to pass event that the caller can set
+        # to end the blink
+        cmd = Blink(led=led, frequency=freq, continuous=True)
+        self._queue.put_nowait(cmd)
 
     def log_rotate(self):
         cmd = Command('logrotate')
