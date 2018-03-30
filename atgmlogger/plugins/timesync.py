@@ -123,6 +123,8 @@ class TimeSyncDaemon(PluginDaemon):
 
     def _valid_time(self, timestamp):
         if not self.timetravel and timestamp > time.time():
+            APPLOG.debug("Timestamp is valid, {ts} > {now}".format(
+                ts=timestamp, now=time.time()))
             return True
         else:
             return False

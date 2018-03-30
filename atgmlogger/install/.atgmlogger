@@ -18,7 +18,8 @@
     "gpio": {
         "mode": "board",
         "data_pin": 11,
-        "usb_pin": 13
+        "usb_pin": 13,
+        "freq": 0.04
     },
     "usb": {
         "mountpath": "/media/removable",

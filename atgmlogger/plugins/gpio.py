@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 
-import logging
 import threading
 import time
+import queue
 
 from . import PluginInterface
+from .. import APPLOG
 from ..dispatcher import Blink
 
-_APPLOG = logging.getLogger(__name__)
 
 try:
     import RPi.GPIO as gpio
@@ -43,8 +43,12 @@ class _BlinkUntil(threading.Thread):
                 self._delegate(self._blink)
 
 
+# TODO: Consider limiting queue size, or inferring elsewhere the data rate
+# Limiting the queue might cause continuous blinks to be ignored if put with
+# nowait - this does cause random behavior where the continuous start signal
+# might be received but not the stop
 class GPIOListener(PluginInterface):
-    options = ['mode', 'data_pin', 'usb_pin']
+    options = ['mode', 'data_pin', 'usb_pin', 'freq']
 
     def __init__(self):
         super().__init__()
@@ -55,15 +59,16 @@ class GPIOListener(PluginInterface):
         self.modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
         self.data_pin = 11
         self.usb_pin = 13
+        self.freq = 0.04
 
         self._blink_until_sig = threading.Event()
+        # self.queue = queue.Queue(maxsize=20)
 
     @staticmethod
     def consumer_type():
         return {Blink}
 
     def configure(self, **options):
-        # _APPLOG.debug("Configuring GPIO with options: {}".format(options))
         super().configure(**options)
         _mode = self.modes[getattr(self, 'mode', 'board')]
         gpio.setwarnings(False)
@@ -89,9 +94,9 @@ class GPIOListener(PluginInterface):
             return
         if HAVE_GPIO:
             gpio.output(led_id, True)
-            time.sleep(blink.frequency)
+            time.sleep(self.freq)
             gpio.output(led_id, False)
-            time.sleep(blink.frequency)
+            time.sleep(self.freq)
 
     def _blink_until_stopped(self, blink):
         while not self._blink_until_sig.is_set():
@@ -103,7 +108,7 @@ class GPIOListener(PluginInterface):
         # Maybe a separate thread for each output LED, which can be
         # controlled via external signals/calls
         if not HAVE_GPIO:
-            _APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
+            APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
                             self.__class__.__name__)
             return
 
@@ -136,5 +141,3 @@ class GPIOListener(PluginInterface):
         for pin in self.outputs:
             gpio.output(pin, False)
         gpio.cleanup()
-
-

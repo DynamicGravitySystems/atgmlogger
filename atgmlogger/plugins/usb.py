@@ -12,8 +12,6 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from pprint import pprint
-
 from .. import APPLOG
 from . import PluginDaemon
 
@@ -259,12 +257,13 @@ class RemovableStorageHandler(PluginDaemon):
                          "runner.")
             return
 
-        commands = ['uptime', 'vcgencmd measure_temp', 'top -b -n1', 'df -H',
-                    'free -h', 'dmesg']
-        # TODO: Put formatted date
         dt = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(
             time.time()))
         result = 'Diagnostic Results ({dt}):\n\n'.format(dt=dt)
+
+        commands = ['uptime', 'vcgencmd measure_temp', 'top -b -n1', 'df -H',
+                    'free -h', 'dmesg']
+
         for cmd in commands:
             result += 'Command: %s\n' % cmd
             try:
@@ -292,6 +291,7 @@ class RemovableStorageHandler(PluginDaemon):
 
     @_filehook(r'\bconf(ig)?\.(json|txt|cfg)')
     def set_config(self, match):
+        # Note, runtime configuration will not be applied until restart
         from ..runconfig import rcParams
         base_path = rcParams.path
         with open(match, 'r') as cfg:

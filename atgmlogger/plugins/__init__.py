@@ -5,6 +5,8 @@ import queue
 import threading
 from importlib import import_module
 
+from .. import APPLOG
+
 __all__ = ['PluginInterface', 'PluginDaemon', 'load_plugin']
 
 
@@ -44,6 +46,8 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         return self._context
 
     def configure(self, **options):
+        APPLOG.debug("Configuring Plugin: {} with options: {}".format(
+            self.__class__.__name__, options))
         for key, value in options.items():
             lkey = str(key).lower()
             if lkey in self.options:
@@ -64,7 +68,10 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
             self.join()
 
     def put(self, item):
-        self.queue.put_nowait(item)
+        try:
+            self.queue.put_nowait(item)
+        except queue.Full:
+            pass
 
     def get(self, block=True, timeout=None):
         """
@@ -80,8 +87,10 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         return self.queue.get(block=block, timeout=timeout)
 
     def task_done(self):
-        if hasattr(self.queue, 'task_done'):
+        try:
             self.queue.task_done()
+        except AttributeError:
+            pass
 
     @property
     def configured(self) -> bool:

@@ -1,3 +1,8 @@
+# setup.py for atgmlogger
+#
+# (C) 2016-2018 Zachery Brady
+
+
 from setuptools import setup
 from atgmlogger import __version__, __description__
 
@@ -14,7 +19,8 @@ setup(
     license='',
     author='Zachery Brady',
     author_email='bradyzp@dynamicgravitysystems.com',
-    description=__description__,
+    description="Serial Data Recording Utility for Linux/RaspberryPi devices.",
+    long_description=__description__,
     install_requires=requirements,
     python_requires='>=3.5.*',
     include_package_data=True,
@@ -25,5 +31,19 @@ setup(
         ]
     },
     setup_requires=['pytest-runner'],
-    tests_require=['pytest']
+    tests_require=['pytest'],
+    classifiers=[
+        'Development Status :: 3 - Alpha',
+        'Environment :: Console',
+        'Environment :: No Input/Output (Daemon)',
+        'Intended Audience :: Science/Research',
+        'Natural Language :: English',
+        'Operating System :: POSIX :: Linux',
+        'Programming Language :: Python :: 3.5',
+        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: Implementation :: CPython',
+        'Topic :: Scientific/Engineering :: GIS',
+        'Topic :: Terminals :: Serial',
+        'Topic :: Utilities'
+    ]
 )

@@ -2,26 +2,12 @@
 
 import io
 from pathlib import Path
-# from io import TextIOBase
 
 from atgmlogger import APPLOG
 from .plugins import PluginInterface
 from .dispatcher import Command
 
 __all__ = ['DataLogger']
-DATA_LVL = 75
-
-
-def level_filter(level):
-    """Return a filter function to be used by a logging handler.
-    This function is referenced in the default logging config file."""
-    def _filter(record):
-        """Filter a record based on level, allowing only records less than
-        the specified level."""
-        if record.levelno < level:
-            return True
-        return False
-    return _filter
 
 
 class DataLogger(PluginInterface):
@@ -74,6 +60,8 @@ class DataLogger(PluginInterface):
             APPLOG.exception("Error opening file for writing.")
             return
 
+        # TODO: Maybe sample first 5 lines of data, find the mode (freq) of
+        # data transmission to set Blink frequency
         while not self.exiting:
             try:
                 item = self.get(block=True, timeout=None)

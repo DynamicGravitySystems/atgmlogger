@@ -51,6 +51,7 @@ class SerialListener:
         self._handle = handle
         self._queue = collector or queue.Queue()
         self.sigExit = sigExit or threading.Event()
+        self.buffer = bytearray()
 
         if not self._handle.is_open:
             self._handle.open()
@@ -79,7 +80,7 @@ class SerialListener:
 
         """
         while not self.exiting:
-            data = self.decode(self._handle.readline())
+            data = self.decode(self.readline())
             if data is None or data == '':
                 continue
             self._queue.put_nowait(data)
@@ -87,6 +88,31 @@ class SerialListener:
         APPLOG.debug("Exiting listener.listen() method, and closing serial "
                      "handle.")
         self._handle.close()
+
+    def readline(self):
+        """
+        This method drastically reduces CPU usage of the utility (from ~50%
+        when reading 10hz gravity data to ~27%)
+
+        Credit for this function to skoehler (https://github.com/skoehler) from
+        https://github.com/pyserial/pyserial/issues/216
+
+        """
+        i = self.buffer.find(b"\n")
+        if i >= 0:
+            line = self.buffer[:i+1]
+            self.buffer = self.buffer[i+1:]
+            return line
+        while True:
+            i = max(1, min(2048, self._handle.in_waiting))
+            data = self._handle.read(i)
+            i = data.find(b"\n")
+            if i >= 0:
+                line = self.buffer + data[:i+1]
+                self.buffer[0:] = data[i+1:]
+                return line
+            else:
+                self.buffer.extend(data)
 
     @staticmethod
     def decode(bytearr, encoding='utf-8'):
@@ -124,10 +150,9 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     dispatcher = Dispatcher(collector=collector)
 
     # Explicitly register the DataLogger 'plugin'
-    from .logger import DataLogger, DataLogger
-    # dispatcher.register(DataLogger)
-    dispatcher.register(DataLogger, logfile=Path(
-        '/var/log/atgmlogger/gravdata.dat'))
+    from .logger import DataLogger
+    logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
+    dispatcher.register(DataLogger, logfile=logfile)
 
     plugins = plugins or rcParams['plugins']
     if plugins is not None:
