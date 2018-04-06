@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import os
 import re
@@ -90,12 +91,10 @@ def _filehook(pattern):
         wrapper.filehook = re.compile(pattern)
         return wrapper
     return inner
-# TODO: Do away with these decorators ^
 
 
 class RemovableStorageHandler(PluginDaemon):
     options = {'mountpath': Path, 'logdir': Path, 'patterns': list}
-    # options = ['mountpath', 'logdir', 'patterns']
 
     mountpath = Path('/media/removable')
     logdir = Path('/var/log/atgmlogger')
@@ -145,7 +144,7 @@ class RemovableStorageHandler(PluginDaemon):
         try:
             os.sync()
         except AttributeError:
-            # os.sync is not available on Windows
+            # os.sync is not available on all platforms (Windows)
             pass
         finally:
             umount(self.mountpath)
@@ -228,12 +227,6 @@ class RemovableStorageHandler(PluginDaemon):
     @_filehook(r'clear(\.txt)?')
     def clear_logs(self, match):
         APPLOG.info("Clearing old application logs and gravity data files.")
-        with match.open('r') as fd:
-            contents = fd.read()
-            # if contents.startswith('archive'):
-            #     APPLOG.info("Rotating and archiving logs.")
-            #     self.context.logrotate()
-
         for file in self.logdir.iterdir():  # type: Path
             if file.is_file() and file.suffix in ['.gz']:
                 APPLOG.warning("Deleting archived file: %s", file.name)
@@ -242,8 +235,9 @@ class RemovableStorageHandler(PluginDaemon):
                 except OSError:
                     APPLOG.exception()
 
-        # Remove the trigger file to prevent accidents
         try:
+            # Remove the trigger file to prevent unintentional deletion next
+            # time usb drive is used.
             os.remove(str(match.resolve()))
         except OSError:
             pass
@@ -286,6 +280,7 @@ class RemovableStorageHandler(PluginDaemon):
 
             with match.open('w+') as fd:
                 fd.write(cfg_data)
+            APPLOG.info("Writing configuration to {}".format(str(match)))
         except (IOError, OSError):
             APPLOG.exception()
 
@@ -294,10 +289,12 @@ class RemovableStorageHandler(PluginDaemon):
         # Note, runtime configuration will not be applied until restart
         from ..runconfig import rcParams
         base_path = rcParams.path
-        with open(match, 'r') as cfg:
+        with match.open('r') as cfg:
             APPLOG.warning("Loading new configuration from USB device path: "
                            "%s", match)
             rcParams.load_config(cfg)
 
         rcParams.dump(path=base_path, exist_ok=True)
+        APPLOG.info("New configuration file loaded from USB device. Changes "
+                    "will not take effect until restart.")
 

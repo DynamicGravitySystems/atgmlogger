@@ -14,7 +14,7 @@ def usb_plugin():
 
 def test_usb_configure(usb_plugin, mountpoint):
     params = dict(mountpath=mountpoint,
-                  logdir=Path('test/logs'),
+                  logdir=Path('tests/logs'),
                   patterns=['*.dat', '*.data', '*.grav', '*.log'])
     usb_plugin.configure(**params)
 
@@ -32,7 +32,7 @@ def test_usb_watchfiles(usb_plugin, mountpoint: Path):
     # _usb.CHECK_PLATFORM = False
 
     params = dict(mountpath=mountpoint,
-                  logdir='test/logs',
+                  logdir='tests/logs',
                   patterns=['*.dat', '*.data', '*.grav', '*.log'])
     usb_plugin.configure(**params)
 

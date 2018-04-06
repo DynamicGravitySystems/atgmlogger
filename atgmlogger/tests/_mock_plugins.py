@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# PyTest utility module containing Dispatch test modules for atgmlogger
+# PyTest utility module containing Dispatch tests modules for atgmlogger
 import logging
 import threading
 

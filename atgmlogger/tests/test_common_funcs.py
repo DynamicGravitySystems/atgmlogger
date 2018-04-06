@@ -119,7 +119,7 @@ def test_config(cfg_dict):
 def test_fallback_config(cfg_dict):
     # Test ConfigParams loading when no configuration file is available
     for path in _ConfigParams.cfg_paths:
-        # Make sure none of the search paths exist or this will skew the test
+        # Make sure none of the search paths exist or this will skew the tests
         assert not path.exists()
     cfg = _ConfigParams()
     # Selectively exclude logging node due to filepath expansion

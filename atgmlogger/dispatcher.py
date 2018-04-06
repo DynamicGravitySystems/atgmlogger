@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import queue
 import threading
@@ -88,8 +89,7 @@ class Dispatcher(threading.Thread):
         APPLOG.debug("Dispatcher run acquired runlock")
 
         # Create perpetual listener threads
-        listener_map = {}  # Todo: Better name for this? (What is this for -
-        # ah, it maps listener types to listeners that accept the type)
+        listener_map = {}
         for listener in self._listeners:
             try:
                 instance = listener()
@@ -122,7 +122,6 @@ class Dispatcher(threading.Thread):
                 self._queue.task_done()
 
             # Check if a daemon needs to be spawned
-            # TODO: Decide if daemons should be checked periodically
             for daemon in self._daemons:
                 if daemon not in daemons and daemon.condition(item):
                     try:

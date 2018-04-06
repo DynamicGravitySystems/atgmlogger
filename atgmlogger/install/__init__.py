@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import os
 import shlex
@@ -46,10 +47,6 @@ def write_bytes(path: str, bytearr, mode=0o644):
         _log.exception("Exception writing template to file: %s", str(path))
 
 
-def check_exists(fpath: str, verbose=True):
-    pass
-
-
 def sys_command(cmd, verbose=True):
     try:
         if verbose:
@@ -64,8 +61,6 @@ def sys_command(cmd, verbose=True):
 
 
 def _install_logrotate_config(log_path=None):
-    # TODO: What happens after rotation, will program still continue with old
-    #  file handle? - logger won't
     # Create atgmlogger logrotate file in /etc/logrotate.d/atgmlogger
     # If atgmlogger config is dropped above, no further action needed as
     # there should already be a daily logrotate cron entry

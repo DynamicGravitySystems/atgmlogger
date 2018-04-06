@@ -8,13 +8,14 @@ from atgmlogger import __version__, __description__
 
 requirements = [
     'pyserial >= 3.3',
-    # 'RPi.GPIO >= 0.6.3'
+    'RPi.GPIO >= 0.6.3'
 ]
 
 setup(
     name='atgmlogger',
     version=__version__,
-    packages=['atgmlogger', 'atgmlogger.plugins', 'test', 'test.plugins'],
+    packages=['atgmlogger', 'atgmlogger.plugins', 'atgmlogger.tests',
+              'atgmlogger.tests.plugins'],
     url='https://github.com/bradyzp/dgs-serial-logger',
     license='',
     author='Zachery Brady',

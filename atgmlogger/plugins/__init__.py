@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import abc
 import queue
@@ -111,15 +112,6 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
 
 class PluginDaemon(threading.Thread, metaclass=abc.ABCMeta):
     options = {}
-    # _instance = None
-
-    # def __new__(cls, *args, **kwargs):
-    #     if cls._instance is not None and cls._instance.is_alive():
-    #         raise TypeError("Daemon already exists.")
-    #     else:
-    #         if cls._instance: del cls._instance
-    #         cls._instance = super().__new__(cls)
-    #         return cls._instance
 
     def __init__(self, **kwargs):
         super().__init__(daemon=True)
@@ -150,13 +142,6 @@ class PluginDaemon(threading.Thread, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def condition(cls, item=None):
         return False
-
-        # if cls._instance is not None and cls._instance.is_alive():
-        #     return False
-        # else:
-        #     return True
-
-
 
     @classmethod
     def configure(cls, **options):

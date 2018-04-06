@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import copy
 import json

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Advanced Technology Gravity Meter - Logger (AGTMlogger)
+Advanced Technology Gravity Meter - Logger (AGTMLogger)
 
 Linux/Raspberry PI utility designed to record serial data from Dynamic
 Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
@@ -100,16 +100,16 @@ class SerialListener:
         """
         i = self.buffer.find(b"\n")
         if i >= 0:
-            line = self.buffer[:i+1]
-            self.buffer = self.buffer[i+1:]
+            line = self.buffer[:i + 1]
+            self.buffer = self.buffer[i + 1:]
             return line
         while True:
             i = max(1, min(2048, self._handle.in_waiting))
             data = self._handle.read(i)
             i = data.find(b"\n")
             if i >= 0:
-                line = self.buffer + data[:i+1]
-                self.buffer[0:] = data[i+1:]
+                line = self.buffer + data[:i + 1]
+                self.buffer[0:] = data[i + 1:]
                 return line
             else:
                 self.buffer.extend(data)
@@ -138,6 +138,7 @@ def _configure_applog():
             logdir = Path()
 
     from logging.handlers import WatchedFileHandler
+
     applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
                                      encoding='utf-8')
     applog_hdlr.setFormatter(logging.Formatter(LOG_FMT, datefmt=DATE_FMT))
@@ -151,6 +152,7 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
 
     # Explicitly register the DataLogger 'plugin'
     from .logger import DataLogger
+
     logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
     dispatcher.register(DataLogger, logfile=logfile)
 
@@ -206,7 +208,8 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     # End Init Performance Counter
     t_end = time.perf_counter()
     if args.verbose:
-        APPLOG.debug("Initialization time: %.4f", t_end - t_start)
+        APPLOG.info("ATGMLogger started. Initialization time: %.4f", t_end -
+                    t_start)
 
     try:
         if POSIX:
