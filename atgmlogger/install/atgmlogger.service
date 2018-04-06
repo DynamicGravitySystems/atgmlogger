@@ -1,5 +1,5 @@
 [Unit]
-Description=DGS ATGM Serial Logger
+Description=DGS ATGM Serial Logger Daemon
 
 [Service]
 Type=simple

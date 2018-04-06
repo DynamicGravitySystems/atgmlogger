@@ -88,7 +88,8 @@ class Dispatcher(threading.Thread):
         APPLOG.debug("Dispatcher run acquired runlock")
 
         # Create perpetual listener threads
-        listener_map = {}  # Todo: Better name for this?
+        listener_map = {}  # Todo: Better name for this? (What is this for -
+        # ah, it maps listener types to listeners that accept the type)
         for listener in self._listeners:
             try:
                 instance = listener()
@@ -106,6 +107,7 @@ class Dispatcher(threading.Thread):
                 instance.start()
                 self._threads.add(instance)
 
+        daemons = {}  # Dict[daemon: instance of daemon]
         while not self.sigExit.is_set():
             self._tick += 1
             # TODO: Enable polling of plugins even if no data is incoming
@@ -120,15 +122,18 @@ class Dispatcher(threading.Thread):
                 self._queue.task_done()
 
             # Check if a daemon needs to be spawned
+            # TODO: Decide if daemons should be checked periodically
             for daemon in self._daemons:
-                if daemon.condition(item):
+                if daemon not in daemons and daemon.condition(item):
                     try:
                         inst = daemon(context=self._context, data=item)
                         inst.start()
+                        daemons[daemon] = inst
                     except TypeError:
-                        APPLOG.exception()
-                else:
-                    continue
+                        APPLOG.exception("Type error when instantiating "
+                                         "daemon: %s", str(daemon))
+            # Prune finished daemon threads from the dict
+            daemons = {k: v for k, v in daemons.items() if v.is_alive()}
 
         self.release_lock()
 

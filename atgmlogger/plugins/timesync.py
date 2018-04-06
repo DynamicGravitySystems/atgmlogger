@@ -116,10 +116,7 @@ class TimeSyncDaemon(PluginDaemon):
         if not isinstance(item, str):
             return False
         cls._tick += 1
-        if super().condition(item):
-            return cls._tick % cls.interval == 0
-        else:
-            return False
+        return cls._tick % cls.interval == 0
 
     def _valid_time(self, timestamp):
         if not self.timetravel and timestamp > time.time():
@@ -140,7 +137,7 @@ class TimeSyncDaemon(PluginDaemon):
                              "%.2f", ts)
                 set_system_time(ts)
             else:
-                APPLOG.warning("Invalid timestamp extracted from data.")
+                APPLOG.debug("None or invalid timestamp extracted from data.")
         except ValueError:
             pass
 

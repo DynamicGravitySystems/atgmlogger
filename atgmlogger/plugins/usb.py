@@ -103,10 +103,7 @@ class RemovableStorageHandler(PluginDaemon):
 
     @classmethod
     def condition(cls, *args):
-        if super().condition():
-            return os.path.ismount(str(cls.mountpath))
-        else:
-            return False
+        return os.path.ismount(str(cls.mountpath))
 
     def __init__(self, **kwargs):
         APPLOG.debug("Initializing RSH")
@@ -127,14 +124,16 @@ class RemovableStorageHandler(PluginDaemon):
                                         self.__getattribute__(member.__name__)))
                 APPLOG.debug("Appending {} to filehooks".format(member))
 
+    # TODO: Figure out best way to allow only one instance of a plugin to run
     def run(self):
         APPLOG.debug("Starting USB Handler thread")
+        if not os.path.ismount(str(self.mountpath)):
+            APPLOG.error("{path} is not mounted or is not a valid mount point."
+                         .format(path=str(self.mountpath)))
+            return
+
         if not self.logdir.is_dir():
             self.logdir = self.logdir.parent
-        if not os.path.ismount(self.mountpath):
-            APPLOG.error("{path} is not mounted or is not a valid mount point."
-                         .format(path=self.mountpath))
-            return
 
         self.context.blink_until(led='usb')
 
@@ -151,6 +150,7 @@ class RemovableStorageHandler(PluginDaemon):
         finally:
             umount(self.mountpath)
         self.context.blink_until(led='usb')
+
         APPLOG.debug("Returning from USB Handler")
 
     @_runhook(priority=1)

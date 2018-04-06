@@ -92,7 +92,7 @@ class SerialListener:
     def readline(self):
         """
         This method drastically reduces CPU usage of the utility (from ~50%
-        when reading 10hz gravity data to ~27%)
+        when reading 10hz gravity data to ~27% on a raspberry pi zero)
 
         Credit for this function to skoehler (https://github.com/skoehler) from
         https://github.com/pyserial/pyserial/issues/216

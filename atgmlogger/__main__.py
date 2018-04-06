@@ -57,6 +57,7 @@ def parse_args(argv=None):
         except (ImportError, OSError):
             APPLOG.exception("Exception occurred trying to install system "
                              "files.")
+            sys.exit(1)
     elif args.uninstall:
         try:
             from . import install

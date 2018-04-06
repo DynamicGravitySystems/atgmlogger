@@ -38,9 +38,12 @@ _file_map = {
 
 
 def write_bytes(path: str, bytearr, mode=0o644):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT, mode)
-    os.write(fd, bytearr)
-    os.close(fd)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, mode)
+        os.write(fd, bytearr)
+        os.close(fd)
+    except OSError:
+        _log.exception("Exception writing template to file: %s", str(path))
 
 
 def check_exists(fpath: str, verbose=True):
@@ -71,6 +74,8 @@ def _install_logrotate_config(log_path=None):
         log_path = Path(log_path)
     else:
         log_path = Path('/var/log/%s' % BASEPKG)
+        if not log_path.exists():
+            log_path.mkdir()
 
     postscript = """
         postrotate
@@ -125,7 +130,6 @@ def install(verbose=True):
         parent = os.path.split(dest)[0]
         if not os.path.exists(parent):
             try:
-
                 os.mkdir(parent, df_mode)
             except OSError:
                 _log.exception("Error creating directory: %s" % parent)
@@ -136,6 +140,9 @@ def install(verbose=True):
         except (FileNotFoundError, OSError):
             _log.exception("Error writing resource to dest file.")
     _install_logrotate_config()
+
+    # Try to install dependencies for USB removable storage formats
+    sys_command('apt-get install -y ntfs-3g exfat-fuse exfat-utils')
 
     sys_command('systemctl daemon-reload')
     sys_command('systemctl enable media-removable.mount')
@@ -149,8 +156,8 @@ def uninstall(verbose=True):
         _log.setLevel(logging.DEBUG)
     _log.info("Stopping and disabling services.")
     sys_command('systemctl stop atgmlogger.service')
-    sys_command('systemctl disable media-removable.mount && '
-                'systemctl disable atgmlogger.service')
+    sys_command('systemctl disable media-removable.mount')
+    sys_command('systemctl disable atgmlogger.service')
 
     for src, dest in _file_map.items():
         try:
@@ -163,4 +170,3 @@ def uninstall(verbose=True):
                 _log.warning("Unable to remove installed file: %s", dest)
     _log.info("Successfully completed uninstall.")
     return 0
-
