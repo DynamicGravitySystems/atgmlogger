@@ -1,0 +1,10 @@
+[Unit]
+Description=DGS ATGM Serial Logger Daemon
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/atgmlogger -vvv
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

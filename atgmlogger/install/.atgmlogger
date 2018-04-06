@@ -1,0 +1,33 @@
+{
+  "version": 0.4,
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 57600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1
+  },
+  "logging": {
+    "logdir": "/var/log/atgmlogger"
+  },
+  "usb": {
+    "mount": "/media/removable",
+    "copy_level": "debug"
+  },
+  "plugins": {
+    "gpio": {
+        "mode": "board",
+        "data_pin": 11,
+        "usb_pin": 13,
+        "freq": 0.04
+    },
+    "usb": {
+        "mountpath": "/media/removable",
+        "logdir": "/var/log/atgmlogger",
+        "patterns": ["*.dat", "*.log", "*.gz"]
+    },
+    "timesync": {
+        "interval": 1000
+    }
+  }
+}

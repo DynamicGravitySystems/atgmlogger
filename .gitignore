@@ -3,3 +3,10 @@
 data.txt
 *.dat
 __pycache__/*
+venv/*
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+*.log
