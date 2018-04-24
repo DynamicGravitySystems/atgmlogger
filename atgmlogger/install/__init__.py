@@ -137,6 +137,7 @@ def install(verbose=True):
     _install_logrotate_config()
 
     # Try to install dependencies for USB removable storage formats
+    sys_command('apt-get update')
     sys_command('apt-get install -y ntfs-3g exfat-fuse exfat-utils')
 
     sys_command('systemctl daemon-reload')

@@ -7,6 +7,7 @@ from setuptools import setup
 from atgmlogger import __version__, __description__
 
 requirements = [
+    'setuptools >= 38.5.1',
     'pyserial >= 3.3',
     'RPi.GPIO >= 0.6.3'
 ]
