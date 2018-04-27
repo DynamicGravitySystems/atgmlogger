@@ -134,12 +134,13 @@ class TimeSyncDaemon(PluginDaemon):
         try:
             ts = timestamp_from_data(self.data)
             if ts is not None and self._valid_time(ts):
-                APPLOG.debug("Attempting to set system time with timestamp: "
-                             "%.2f", ts)
+                # APPLOG.debug("Attempting to set system time with timestamp: "
+                #              "%.2f", ts)
                 set_system_time(ts)
             else:
-                APPLOG.debug("None or invalid timestamp extracted from data.")
+                pass
+                # APPLOG.debug("None or invalid timestamp extracted from data.")
         except ValueError:
             pass
 
-        APPLOG.debug("TimeSyncDaemon exiting.")
+        # APPLOG.debug("TimeSyncDaemon exiting.")

@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 # setup.py for atgmlogger
 #
-# (C) 2016-2018 Zachery Brady
+# (C) 2016-2018 Zachery P. Brady
 
 
 from setuptools import setup
@@ -17,7 +18,7 @@ setup(
     version=__version__,
     packages=['atgmlogger', 'atgmlogger.plugins', 'atgmlogger.tests',
               'atgmlogger.tests.plugins'],
-    url='https://github.com/bradyzp/dgs-serial-logger',
+    url='https://github.com/bradyzp/atgmlogger',
     license='',
     author='Zachery Brady',
     author_email='bradyzp@dynamicgravitysystems.com',
@@ -38,6 +39,7 @@ setup(
         'Development Status :: 3 - Alpha',
         'Environment :: Console',
         'Environment :: No Input/Output (Daemon)',
+        'License :: OSI Approved :: MIT License',
         'Intended Audience :: Science/Research',
         'Natural Language :: English',
         'Operating System :: POSIX :: Linux',

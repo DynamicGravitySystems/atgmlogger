@@ -46,6 +46,7 @@ def parse_args(argv=None):
 
     if args.debug:
         log_level = logging.DEBUG
+        args.verbose = 5
     else:
         log_level = LOG_LVLMAP.get(args.verbose, logging.INFO)
     APPLOG.setLevel(log_level)

@@ -2,12 +2,14 @@
 # This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import queue
+import logging
 import threading
 from weakref import WeakSet
 
 from . import APPLOG
 from .plugins import PluginInterface, PluginDaemon
 
+LOG = logging.getLogger(__name__)
 POLL_INTV = 1
 
 
@@ -56,12 +58,10 @@ class Dispatcher(threading.Thread):
 
     @classmethod
     def acquire_lock(cls, blocking=True):
-        APPLOG.debug("%s acquired lock.", cls)
         return cls._runlock.acquire(blocking=blocking)
 
     @classmethod
     def release_lock(cls):
-        APPLOG.debug("%s releasing lock.", cls)
         cls._runlock.release()
 
     def __init__(self, collector=None, sigExit=None):
@@ -95,7 +95,7 @@ class Dispatcher(threading.Thread):
                 instance = listener()
                 instance.set_context(self._context)
                 instance.configure(**self._params[listener])
-            except TypeError:
+            except (TypeError, ValueError, AttributeError, RuntimeError):
                 APPLOG.exception("Error instantiating listener.")
                 continue
             else:
