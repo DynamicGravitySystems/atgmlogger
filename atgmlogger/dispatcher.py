@@ -6,7 +6,6 @@ import logging
 import threading
 from weakref import WeakSet
 
-from . import APPLOG
 from .plugins import PluginInterface, PluginDaemon
 
 LOG = logging.getLogger(__name__)
@@ -24,26 +23,26 @@ class Dispatcher(threading.Thread):
         cls.acquire_lock()
         assert klass is not None
         if issubclass(klass, PluginInterface) and klass not in cls._listeners:
-            APPLOG.debug("Registering class {} in dispatcher.".format(klass))
+            LOG.debug("Registering class {} in dispatcher.".format(klass))
             cls._listeners.add(klass)
             cls._params[klass] = params
         elif issubclass(klass, PluginDaemon) and klass not in cls._daemons:
-            APPLOG.debug("Registering class as Daemon")
+            LOG.debug("Registering class as Daemon")
             cls._daemons.add(klass)
             try:
                 klass.configure(**params)
             except (AttributeError, TypeError):
-                APPLOG.warning("Unable to configure daemon class: ", klass)
+                LOG.warning("Unable to configure daemon class: ", klass)
             cls._params[klass] = params
         else:
-            APPLOG.info("Class %s is already registered in dispatcher.",
-                        str(klass))
+            LOG.info("Class %s is already registered in dispatcher.",
+                     str(klass))
         cls.release_lock()
         return klass
 
     @classmethod
     def detach(cls, klass):
-        APPLOG.debug("Attempting to detach %s", str(klass))
+        LOG.debug("Attempting to detach %s", str(klass))
         if klass in cls._listeners:
             cls._listeners.remove(klass)
             del cls._params[klass]
@@ -86,7 +85,7 @@ class Dispatcher(threading.Thread):
 
     def run(self):
         self.acquire_lock(blocking=True)
-        APPLOG.debug("Dispatcher run acquired runlock")
+        LOG.debug("Dispatcher run acquired runlock")
 
         # Create perpetual listener threads
         listener_map = {}
@@ -96,7 +95,7 @@ class Dispatcher(threading.Thread):
                 instance.set_context(self._context)
                 instance.configure(**self._params[listener])
             except (TypeError, ValueError, AttributeError, RuntimeError):
-                APPLOG.exception("Error instantiating listener.")
+                LOG.exception("Error instantiating listener.")
                 continue
             else:
                 ctypes = instance.consumer_type()
@@ -129,8 +128,8 @@ class Dispatcher(threading.Thread):
                         inst.start()
                         daemons[daemon] = inst
                     except TypeError:
-                        APPLOG.exception("Type error when instantiating "
-                                         "daemon: %s", str(daemon))
+                        LOG.exception("Type error when instantiating "
+                                      "daemon: %s", str(daemon))
             # Prune finished daemon threads from the dict
             daemons = {k: v for k, v in daemons.items() if v.is_alive()}
 

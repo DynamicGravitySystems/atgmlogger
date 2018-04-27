@@ -1,12 +1,21 @@
+# PyCharm Project Dir
 .idea/
-*.pyc
-data.txt
-*.dat
+
+# Venv and Byte-compiled objects
 __pycache__/*
 venv/*
+*.pyc
+
+# Distribution/Packaging
 build/
 dist/
 *.egg-info/
 .eggs/
+
+# Unit Test Logs
 .pytest_cache/
-*.log
+atgmlogger/tests/logs/
+
+# Data files used for integration testing
+*.dat
+

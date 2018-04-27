@@ -8,16 +8,17 @@ import time
 import uuid
 import shlex
 import shutil
+import logging
 import functools
 import subprocess
 from pathlib import Path
 from typing import List
 
-from .. import APPLOG
 from . import PluginDaemon
 
 __plugin__ = 'RemovableStorageHandler'
 CHECK_PLATFORM = True
+LOG = logging.getLogger(__name__)
 
 
 def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
@@ -60,16 +61,16 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
 
 def umount(path):
     if CHECK_PLATFORM and not sys.platform.startswith('linux'):
-        APPLOG.warning("umount not supported on Windows Platform")
+        LOG.warning("umount not supported on Windows Platform")
         return -1
     try:
         result = subprocess.check_output(['/bin/umount', str(path)])
     except OSError:
         result = 1
-        APPLOG.exception("Error occurred attempting to un-mount device: {}"
-                         .format(path))
+        LOG.exception("Error occurred attempting to un-mount device: {}"
+                      .format(path))
     else:
-        APPLOG.info("Successfully unmounted %s", str(path))
+        LOG.info("Successfully unmounted %s", str(path))
     return result
 
 
@@ -105,7 +106,7 @@ class RemovableStorageHandler(PluginDaemon):
         return os.path.ismount(str(cls.mountpath))
 
     def __init__(self, **kwargs):
-        APPLOG.debug("Initializing RSH")
+        LOG.debug("Initializing RSH")
         super().__init__(**kwargs)
 
         self._current_path = None
@@ -117,18 +118,18 @@ class RemovableStorageHandler(PluginDaemon):
             # Inspect for decorated methods
             if hasattr(member, 'runhook'):
                 self._run_hooks.append(self.__getattribute__(member.__name__))
-                APPLOG.debug("Appending {} to runhooks".format(member))
+                LOG.debug("Appending {} to runhooks".format(member))
             elif hasattr(member, 'filehook'):
                 self._file_hooks.append((member.filehook,
                                         self.__getattribute__(member.__name__)))
-                APPLOG.debug("Appending {} to filehooks".format(member))
+                LOG.debug("Appending {} to filehooks".format(member))
 
     # TODO: Figure out best way to allow only one instance of a plugin to run
     def run(self):
-        APPLOG.debug("Starting USB Handler thread")
+        LOG.debug("Starting USB Handler thread")
         if not os.path.ismount(str(self.mountpath)):
-            APPLOG.error("{path} is not mounted or is not a valid mount point."
-                         .format(path=str(self.mountpath)))
+            LOG.error("{path} is not mounted or is not a valid mount point."
+                      .format(path=str(self.mountpath)))
             return
 
         if not self.logdir.is_dir():
@@ -138,8 +139,8 @@ class RemovableStorageHandler(PluginDaemon):
 
         for functor in sorted(self._run_hooks, key=lambda x: x.runhook):
             result = functor()
-            APPLOG.debug("USB Function {} returned: {}"
-                         .format(functor, result))
+            LOG.debug("USB Function {} returned: {}"
+                      .format(functor, result))
 
         try:
             os.sync()
@@ -150,11 +151,11 @@ class RemovableStorageHandler(PluginDaemon):
             umount(self.mountpath)
         self.context.blink_until(led='usb')
 
-        APPLOG.debug("Returning from USB Handler")
+        LOG.debug("Returning from USB Handler")
 
     @_runhook(priority=1)
     def copy_logs(self):
-        APPLOG.debug("Processing copy_logs")
+        LOG.debug("Processing copy_logs")
         file_list = []  # type: List[Path]
         copy_size = 0   # Accumulated size of logs in bytes
 
@@ -164,7 +165,7 @@ class RemovableStorageHandler(PluginDaemon):
         for file in file_list:
             copy_size += file.stat().st_size
 
-        APPLOG.info("Total log size to be copied: {} KiB".format(
+        LOG.info("Total log size to be copied: {} KiB".format(
             copy_size/1024))
 
         def get_free(path):
@@ -175,14 +176,14 @@ class RemovableStorageHandler(PluginDaemon):
             return statvfs.f_bsize * statvfs.f_bavail
 
         if copy_size > get_free(self.mountpath):
-            APPLOG.warning("Total size of datafiles to be copied is greater "
-                           "than free-space on device.")
+            LOG.warning("Total size of datafiles to be copied is greater "
+                        "than free-space on device.")
 
         dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
         try:
             dest_dir.mkdir()
         except FileExistsError:
-            APPLOG.warning("Copy Destination Directory already exists.")
+            LOG.warning("Copy Destination Directory already exists.")
 
         for srcfile in file_list:
             fname = srcfile.name
@@ -191,9 +192,9 @@ class RemovableStorageHandler(PluginDaemon):
 
             try:
                 shutil.copy(src_path, dest_path)
-                APPLOG.info("Copied file %s to %s", fname, dest_path)
+                LOG.info("Copied file %s to %s", fname, dest_path)
             except OSError:
-                APPLOG.exception("Exception encountered copying log file.")
+                LOG.exception("Exception encountered copying log file.")
                 continue
 
         self._current_path = dest_dir
@@ -201,39 +202,39 @@ class RemovableStorageHandler(PluginDaemon):
 
     @_runhook(priority=2)
     def watch_files(self, run=True):
-        APPLOG.debug("Processing watch_files")
+        LOG.debug("Processing watch_files")
         root_files = [file.name for file in self.mountpath.iterdir() if
                       file.is_file()]
         files = " ".join(root_files)
-        APPLOG.debug("Mount path root files: %s", files)
+        LOG.debug("Mount path root files: %s", files)
         matched = []
         for pattern, runner in self._file_hooks:
-            APPLOG.debug("Looking for pattern: %s", pattern.pattern)
+            LOG.debug("Looking for pattern: %s", pattern.pattern)
             match = pattern.search(files)
             if match:
                 matched.append(match.group())
-                APPLOG.debug("Matched on pattern: %s", pattern.pattern)
+                LOG.debug("Matched on pattern: %s", pattern.pattern)
                 if run:
                     path = self.mountpath.joinpath(match.group())
                     try:
                         runner(path)
                     except (AttributeError, TypeError):
-                        APPLOG.exception("Exception executing watched file "
-                                         "hook.")
+                        LOG.exception("Exception executing watched file "
+                                      "hook.")
             else:
-                APPLOG.debug("No match on pattern: %s", pattern.pattern)
+                LOG.debug("No match on pattern: %s", pattern.pattern)
         return matched
 
     @_filehook(r'clear(\.txt)?')
     def clear_logs(self, match):
-        APPLOG.info("Clearing old application logs and gravity data files.")
+        LOG.info("Clearing old application logs and gravity data files.")
         for file in self.logdir.iterdir():  # type: Path
             if file.is_file() and file.suffix in ['.gz']:
-                APPLOG.warning("Deleting archived file: %s", file.name)
+                LOG.warning("Deleting archived file: %s", file.name)
                 try:
                     os.remove(str(file.resolve()))
                 except OSError:
-                    APPLOG.exception()
+                    LOG.exception("Error removing archived file.")
 
         try:
             # Remove the trigger file to prevent unintentional deletion next
@@ -244,11 +245,11 @@ class RemovableStorageHandler(PluginDaemon):
 
     @_filehook(r'diag(nostic)?(\.txt)?')
     def run_diag(self, match):
-        APPLOG.debug("Running system diagnostics and exporting result to: %s",
-                     match)
+        LOG.debug("Running system diagnostics and exporting result to: %s",
+                  match)
         if CHECK_PLATFORM and not sys.platform.startswith('linux'):
-            APPLOG.debug("Current platform does not support diagnostics "
-                         "runner.")
+            LOG.debug("Current platform does not support diagnostics "
+                      "runner.")
             return
 
         dt = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(
@@ -263,9 +264,9 @@ class RemovableStorageHandler(PluginDaemon):
             try:
                 res = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
             except (subprocess.SubprocessError, FileNotFoundError):
-                APPLOG.exception("Exception executing diagnostic command: "
-                                 "%s", cmd)
-                res = "Command Failed, see applog for exception details."
+                LOG.exception("Exception executing diagnostic command: "
+                              "%s", cmd)
+                res = "Command Failed, see LOG for exception details."
             result += res + '\n\n'
 
         with match.open('w+') as fd:
@@ -280,9 +281,9 @@ class RemovableStorageHandler(PluginDaemon):
 
             with match.open('w+') as fd:
                 fd.write(cfg_data)
-            APPLOG.info("Writing configuration to {}".format(str(match)))
+            LOG.info("Writing configuration to {}".format(str(match)))
         except (IOError, OSError):
-            APPLOG.exception()
+            LOG.exception("Exception writing configuration.")
 
     @_filehook(r'\bconf(ig)?\.(json|txt|cfg)')
     def set_config(self, match):
@@ -290,11 +291,11 @@ class RemovableStorageHandler(PluginDaemon):
         from ..runconfig import rcParams
         base_path = rcParams.path
         with match.open('r') as cfg:
-            APPLOG.warning("Loading new configuration from USB device path: "
-                           "%s", match)
+            LOG.warning("Loading new configuration from USB device path: "
+                        "%s", match)
             rcParams.load_config(cfg)
 
         rcParams.dump(path=base_path, exist_ok=True)
-        APPLOG.info("New configuration file loaded from USB device. Changes "
-                    "will not take effect until restart.")
+        LOG.info("New configuration file loaded from USB device. Changes "
+                 "will not take effect until restart.")
 

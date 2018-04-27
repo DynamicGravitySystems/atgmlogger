@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
+import logging
 import threading
 import time
-import queue
 
 from . import PluginInterface
-from .. import APPLOG
 from ..dispatcher import Blink
+
+LOG = logging.getLogger(__name__)
 
 
 try:
@@ -108,8 +109,8 @@ class GPIOListener(PluginInterface):
         # Maybe a separate thread for each output LED, which can be
         # controlled via external signals/calls
         if not HAVE_GPIO:
-            APPLOG.warning("GPIO Module is unavailable. Exiting %s thread.",
-                            self.__class__.__name__)
+            LOG.warning("GPIO Module is unavailable. Exiting %s thread.",
+                        self.__class__.__name__)
             return
 
         subthreads = dict()

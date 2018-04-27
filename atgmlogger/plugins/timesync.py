@@ -4,13 +4,15 @@
 import shlex
 import time
 import datetime
+import logging
 import subprocess
 from typing import Union
 
 from . import PluginDaemon
-from .. import APPLOG, POSIX
+from .. import POSIX
 
 __plugin__ = 'TimeSyncDaemon'
+LOG = logging.getLogger(__name__)
 
 
 def convert_gps_time(gpsweek: int, gpsweekseconds: float) -> float:
@@ -102,7 +104,7 @@ def set_system_time(timestamp):
         output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
         return output
     else:
-        APPLOG.info("set_system_time not supported on this platform.")
+        LOG.info("set_system_time not supported on this platform.")
         return None
 
 
@@ -121,7 +123,7 @@ class TimeSyncDaemon(PluginDaemon):
 
     def _valid_time(self, timestamp):
         if not self.timetravel and timestamp > time.time():
-            APPLOG.debug("Timestamp is valid, {ts} > {now}".format(
+            LOG.debug("Timestamp is valid, {ts} > {now}".format(
                 ts=timestamp, now=time.time()))
             return True
         else:
