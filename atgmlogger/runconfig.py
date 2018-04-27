@@ -16,7 +16,7 @@ LOG = logging.getLogger(__name__)
 
 class _ConfigParams:
     """Centralize the loading and dissemination of configuration parameters"""
-    cfg_name = '.atgmlogger'
+    cfg_name = 'atgmlogger.json'
     cfg_paths = [Path('~').expanduser().joinpath(cfg_name),
                  Path('/etc/atgmlogger').joinpath(cfg_name),
                  Path('/opt/atgmlogger').joinpath(cfg_name)]
@@ -46,7 +46,7 @@ class _ConfigParams:
                 try:
                     import pkg_resources as pkg
                     rawfd = pkg.resource_stream(_base + '.install',
-                                                '.atgmlogger')
+                                                self.cfg_name)
                     text_wrapper = TextIOWrapper(rawfd, encoding='utf-8')
 
                     self.load_config(text_wrapper)

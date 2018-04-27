@@ -1,0 +1,42 @@
+{
+  "version": "0.4.1-alpha.1",
+  "serial": {
+    "port": "/dev/serial0",
+    "baudrate": 57600,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1
+  },
+  "logging": {
+    "logdir": "/var/log/atgmlogger"
+  },
+  "usb": {
+    "mount": "/media/removable",
+    "copy_level": "debug"
+  },
+  "plugins": {
+    "gpio": {
+        "mode": "board",
+        "data_pin": 11,
+        "usb_pin": 13,
+        "freq": 0.03
+    },
+    "usb": {
+        "mountpath": "/media/removable",
+        "logdir": "/var/log/atgmlogger",
+        "patterns": ["*.dat", "*.log", "*.gz"]
+    },
+    "timesync": {
+        "interval": 1000
+    },
+    "mqtt": {
+      "sensorid": "",
+      "topicid": "",
+      "topic_pre": "sensor",
+      "endpoint": "a1am86ft3unytc.iot.us-west-2.amazonaws.com",
+      "rootca": "root-CA.crt",
+      "prikey": "",
+      "devcert": ""
+    }
+  }
+}

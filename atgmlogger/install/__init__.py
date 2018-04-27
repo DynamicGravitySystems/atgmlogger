@@ -29,7 +29,8 @@ LOG.addHandler(logging.FileHandler(_install_log_path,
 
 
 _file_map = {
-    '.atgmlogger': '%s/etc/%s/.atgmlogger' % (PREFIX, BASEPKG),
+    'atgmlogger.json': '%s/etc/%s/atgmlogger.json' % (PREFIX, BASEPKG),
+    'atgmlogger-mqtt.json': '%s/etc/%s/atgmlogger-mqtt.json' % (PREFIX, BASEPKG),
     'media-removable.mount':
         '%s/lib/systemd/system/media-removable.mount' % PREFIX,
     '90-removable-storage.rules':

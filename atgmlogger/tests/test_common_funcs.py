@@ -84,16 +84,16 @@ def test_timestamp_from_data():
 @pytest.mark.skip("Broken due to refactoring of parse_args into __main__.py")
 def test_parse_args():
     from atgmlogger.runconfig import rcParams
-    cfg_path = Path('atgmlogger/install/.atgmlogger')
+    cfg_path = Path('atgmlogger/install/atgmlogger.json')
     with cfg_path.open('r') as fd:
         rcParams.load_config(fd)
-    argv = ['atgmlogger.py', '-vvv', '-c', 'atgmlogger/install/.atgmlogger',
+    argv = ['atgmlogger.py', '-vvv', '-c', 'atgmlogger/install/atgmlogger.json',
             '--logdir', '/var/log/atgmlogger']
     from atgmlogger.__main__ import parse_args
     args = parse_args(argv)
 
     assert args.verbose == 3
-    assert args.config == 'atgmlogger/install/.atgmlogger'
+    assert args.config == 'atgmlogger/install/atgmlogger.json'
     assert args.logdir == '/var/log/atgmlogger'
     assert rcParams['logging.logdir'] == '/var/log/atgmlogger'
 
@@ -143,7 +143,7 @@ def test_config_default(cfg_dict):
 
 
 def test_configparams_search(cfg_dict):
-    cfg = _ConfigParams(path='atgmlogger/install/.atgmlogger')
+    cfg = _ConfigParams(path='atgmlogger/install/atgmlogger.json')
 
     assert cfg.config == cfg_dict
 
