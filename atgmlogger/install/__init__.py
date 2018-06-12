@@ -83,6 +83,7 @@ def _install_logrotate_config(log_path=None):
     config = """
     {logpath}/*.log {{
         missingok
+        notifempty
         daily
         dateext
         dateyesterday
@@ -92,6 +93,7 @@ def _install_logrotate_config(log_path=None):
     }}
     {logpath}/*.dat {{
         missingok
+        notifempty
         daily
         dateext
         dateyesterday
