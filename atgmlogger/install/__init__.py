@@ -66,6 +66,21 @@ def _sys_command(cmd, verbose=True):
         return -1
 
 
+def _install_plugin_user_files():
+    plugin_dir = pkg_resources.resource_listdir(BASEPKG, 'plugins')
+    plugin_mod = '.'.join([BASEPKG, 'plugins'])
+    dest_path = '/etc/atgmlogger/plugins/'
+    if not os.path.exists(dest_path):
+        os.mkdir(dest_path, mode=0o644)
+
+    for file in plugin_dir:
+        if not pkg_resources.resource_isdir(plugin_mod, file):
+            plugin_str = pkg_resources.resource_string(plugin_mod, file)
+            _write_bytes(os.path.join(dest_path, file), plugin_str)
+        else:
+            continue
+
+
 def _install_service_units(execstart=None, environment=None, workingdir=None, user=None):
     environment = environment or ""
     workingdir = workingdir or '/etc/atgmlogger'
@@ -195,7 +210,7 @@ def install(args):
     else:
         LOG.setLevel(LOG_LVLMAP.get(args.verbose))
     if not POSIX:
-        LOG.warning("Invalid system platform for installation.")
+        LOG.critical("Invalid system platform for installation. (Not POSIX)")
         return 1
 
     df_mode = 0o640
@@ -234,6 +249,8 @@ def install(args):
 
     if args.logrotate:
         _install_logrotate_config()
+
+    _install_plugin_user_files()
 
     if args.service:
         _install_service_units()

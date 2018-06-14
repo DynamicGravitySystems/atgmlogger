@@ -4,8 +4,8 @@ import logging
 import threading
 import time
 
-from . import PluginInterface
-from ..dispatcher import Blink
+from atgmlogger.plugins import PluginInterface
+from atgmlogger.dispatcher import Blink
 
 LOG = logging.getLogger(__name__)
 

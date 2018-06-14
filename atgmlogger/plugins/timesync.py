@@ -9,7 +9,7 @@ import subprocess
 from typing import Union
 
 from . import PluginDaemon
-from .. import POSIX
+from atgmlogger import POSIX
 
 __plugin__ = 'TimeSyncDaemon'
 LOG = logging.getLogger(__name__)
