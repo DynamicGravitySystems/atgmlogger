@@ -131,6 +131,7 @@ class SerialListener:
         return decoded
 
 
+# TODO: Move some/all of this functionality into __main__ initialize function
 def _configure_applog(log_format):
     logdir = Path(rcParams['logging.logdir'])
     if not logdir.exists():
@@ -167,7 +168,7 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
             try:
                 load_plugin(plugin, register=True, **plugins[plugin])
                 LOG.info("Loaded plugin: %s", plugin)
-            except ImportError:  # ModuleNotFoundError implemented in 3.6
+            except ImportError:  # ModuleNotFoundError not implemented until py3.6
                 if verbosity is not None and verbosity >= 2:
                     LOG.exception("Plugin <%s> could not be loaded. Continuing.", plugin)
                 else:
@@ -206,6 +207,7 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     # Init Performance Counter
     t_start = time.perf_counter()
 
+    # TODO: Again candidate to move into __main__::initialize
     fmt = LOG_FMT
     if args.trace:
         fmt = TRACE_LOG_FMT

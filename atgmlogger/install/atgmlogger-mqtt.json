@@ -32,11 +32,15 @@
     "mqtt": {
       "sensorid": "",
       "topicid": "",
-      "topic_pre": "sensor",
-      "endpoint": "a1am86ft3unytc.iot.us-west-2.amazonaws.com",
-      "rootca": "root-CA.crt",
-      "prikey": "",
-      "devcert": ""
+      "topic_pfx": "sensor",
+      "endpoint": "",
+      "rootca": "aws.root.crt",
+      "prikey": "iot.pem.key",
+      "devcert": "iot.pem.crt",
+      "interval": 1,
+      "fields": [
+        "gravity", "long", "cross", "temp", "pressure", "latitude", "longitude", "datetime"
+      ]
     }
   }
 }
