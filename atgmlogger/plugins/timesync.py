@@ -121,6 +121,10 @@ class TimeSyncDaemon(PluginDaemon):
         cls._tick += 1
         return cls._tick % cls.interval == 0
 
+    @classmethod
+    def reset_tick(cls):
+        cls._tick = 0
+
     def _valid_time(self, timestamp):
         if not self.timetravel and timestamp > time.time():
             LOG.debug("Timestamp is valid, {ts} > {now}".format(
@@ -132,17 +136,13 @@ class TimeSyncDaemon(PluginDaemon):
     def run(self):
         if not self.data:
             raise ValueError("TimeSyncDaemon has no data set.")
-
         try:
+            self.reset_tick()
             ts = timestamp_from_data(self.data)
             if ts is not None and self._valid_time(ts):
-                # APPLOG.debug("Attempting to set system time with timestamp: "
-                #              "%.2f", ts)
                 set_system_time(ts)
             else:
                 pass
-                # APPLOG.debug("None or invalid timestamp extracted from data.")
         except ValueError:
             pass
 
-        # APPLOG.debug("TimeSyncDaemon exiting.")

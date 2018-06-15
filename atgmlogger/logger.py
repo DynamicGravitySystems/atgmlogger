@@ -78,7 +78,7 @@ class DataLogger(PluginInterface):
                     self.context.blink()
                     self.queue.task_done()
             except IOError:
-                LOG.exception()
+                LOG.exception("IOError attempting to read/write data line")
                 continue
         self._hdl.close()
 
