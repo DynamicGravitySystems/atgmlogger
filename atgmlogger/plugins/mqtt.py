@@ -6,12 +6,16 @@ import logging
 from datetime import datetime
 from uuid import uuid4
 
-from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+LOG = logging.getLogger(__name__)
+try:
+    from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+except ImportError:
+    LOG.exception("AWSIoTPythonSDK not available. Run pip install AWSIoTPythonSDK in the ATGMLogger environment.")
+    raise
 
-from . import PluginInterface
+from atgmlogger.plugins import PluginInterface
 from atgmlogger.runconfig import rcParams
 
-LOG = logging.getLogger(__name__)
 
 """
 MQTTClient Plugin (mqtt)
@@ -36,7 +40,6 @@ Full line of data is approx 124 bytes, or approx 160 bytes when wrapped with JSO
 TODO
 ----
 Option to batch send data as Json list of maps (reduce IoT cost if each message < 5kb)
-Option to send fraction of data, e.g. send data point every 10 seconds, every minute etc
 
 
 MQTT Plugin configuration options:
@@ -47,7 +50,7 @@ topicid : String, optional
     Optional topicid to publish messages to, will use sensorid by default
 topic_pfx : String, optional
     Optional prefix branch to publish message to, uses gravity by default
-endpoint : String
+endpoint : String, required
     Required, AWSIoT Endpoint URL
 rootca : String
     Optional, path to root CA Certificate for AWS IoT. Relative to the configuration
@@ -58,6 +61,9 @@ prikey : String
 devcert : String
     Optional name of device certificate (PEM) file for this IoT device. Relative to
     config path. Defaults to iot.cert.pem
+interval : Number, optional
+    Optional interval of ticks at which to send a data line, e.g. with default 1, every data line is sent,
+    with interval of 10, every 10th data line is sent.
 
 """
 
@@ -136,13 +142,20 @@ def get_timestamp(fields):
 
 
 class MQTTClient(PluginInterface):
-    options = ['sensorid', 'topicid', 'topic_pfx', 'endpoint', 'rootca', 'prikey', 'devcert', 'batch', 'interval']
+    options = ['sensorid', 'topicid', 'topic_pfx', 'endpoint', 'rootca', 'prikey', 'devcert', 'batch', 'interval',
+               'fields']
     topic_pfx = 'gravity'
     endpoint = None
     rootca = 'root-CA.crt'
     prikey = 'iot.private.key'
     devcert = 'iot.cert.pem'
     interval = 1
+    fields = ['gravity', 'long', 'cross', 'latitude', 'longitude', 'datetime']
+
+    # Ordered list of marine fields
+    _marine_fieldmap = ['header', 'gravity', 'long', 'cross', 'beam', 'temp', 'pressure', 'etemp', 'vcc', 've', 'al',
+                        'ax', 'status', 'checksum', 'latitude', 'longitude', 'speed', 'course', 'datetime']
+    _airborne_fieldmap = []
 
     def __init__(self):
         super().__init__()
@@ -151,16 +164,26 @@ class MQTTClient(PluginInterface):
         self.client = None
         self.tick = 0
         self.sensorid = None
+        self._errcount = 0
+
+    @classmethod
+    def extract_fields(cls, data: str, fieldmap=_marine_fieldmap):
+        extracted = {}
+        data = data.split(',')
+        for i, field in enumerate(fieldmap):
+            if field.lower() in cls.fields:
+                extracted[field] = data[i]
+        return extracted
 
     @staticmethod
     def consumer_type() -> set:
         return {str}
 
-    def _batch_process(self):
-        # TODO: Implement batch publish feature, perhaps collect items in a queue until a limit is reached
-        # then publish as a list of json maps
-        sendqueue = []
-        limit = 10
+    # def _batch_process(self):
+    #     # TODO: Implement batch publish feature, perhaps collect items in a queue until a limit is reached
+    #     # then publish as a list of json maps
+    #     sendqueue = []
+    #     limit = 10
 
     def configure_client(self):
         if self.endpoint is None:
@@ -184,9 +207,6 @@ class MQTTClient(PluginInterface):
         except AttributeError:
             LOG.exception("Missing attributes from configuration for MQTT plugin.")
             raise
-        except:
-            LOG.exception("Error running MQTTClient Plugin")
-            raise RuntimeError("Error instantiating MQTTClient.")
         return topic
 
     def run(self):
@@ -202,19 +222,21 @@ class MQTTClient(PluginInterface):
                     self.tick = 0  # reset tick count
                     fields = item.split(',')
                     timestamp = get_timestamp(fields)
-                    if len(fields):
-                        gravity = fields[1]
-                    else:
-                        gravity = 0
+                    if not len(fields):
+                        continue
 
-                    small_data = ','.join([str(gravity)])
+                    data_dict = self.extract_fields(item)
 
-                    item_json = json.dumps({'d': self.sensorid, 't': timestamp, 'v': small_data})
-                    # Note: returns bool value on success/fail of publish
+                    item_json = json.dumps({'d': self.sensorid, 't': timestamp, 'v': data_dict})
+                    # Note: returns bool value on success/fail of publish (maybe useful to know)
                     self.client.publish(topic, item_json, 0)
                     self.task_done()
                 except:
                     LOG.exception("Exception occured in mqtt-run loop. Item value: %s", item)
+                    self._errcount += 1
+                    if self._errcount > 10:
+                        # Terminate MQTT if errors accumulate
+                        raise
 
         self.client.disconnect()
 
