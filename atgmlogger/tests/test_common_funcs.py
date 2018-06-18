@@ -10,7 +10,7 @@ import pytest
 
 from atgmlogger import atgmlogger
 from atgmlogger.runconfig import _ConfigParams
-from atgmlogger.plugins import load_plugin
+from atgmlogger.atgmlogger import load_plugin
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -79,23 +79,6 @@ def test_timestamp_from_data():
     data_malformed = '$UW,81251,2489,4779,4807953,307,874,201,-8919,7232'
     res = timesync.timestamp_from_data(data_malformed)
     assert res is None
-
-
-@pytest.mark.skip("Broken due to refactoring of parse_args into __main__.py")
-def test_parse_args():
-    from atgmlogger.runconfig import rcParams
-    cfg_path = Path('atgmlogger/install/atgmlogger.json')
-    with cfg_path.open('r') as fd:
-        rcParams.load_config(fd)
-    argv = ['atgmlogger.py', '-vvv', '-c', 'atgmlogger/install/atgmlogger.json',
-            '--logdir', '/var/log/atgmlogger']
-    from atgmlogger.__main__ import parse_args
-    args = parse_args(argv)
-
-    assert args.verbose == 3
-    assert args.config == 'atgmlogger/install/atgmlogger.json'
-    assert args.logdir == '/var/log/atgmlogger'
-    assert rcParams['logging.logdir'] == '/var/log/atgmlogger'
 
 
 def test_config(cfg_dict):

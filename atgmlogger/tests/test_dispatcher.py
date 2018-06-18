@@ -6,7 +6,7 @@ import threading
 import pytest
 
 from . import plugins  # needed for py3.6.2 for some reason
-from atgmlogger.plugins import PluginInterface, load_plugin
+from atgmlogger.atgmlogger import PluginInterface, load_plugin
 
 root_log = logging.getLogger()
 if len(root_log.handlers):
@@ -71,7 +71,7 @@ def test_dispatch_selective_load(dispatcher):
 
 
 def test_load_plugin(dispatcher):
-    plugin = load_plugin('basic_plugin', path="%s.plugins" % __package__,
+    plugin = load_plugin('basic_plugin', path=os.path.abspath('atgmlogger/tests/plugins/basic_plugin.py'),
                          register=True)
     assert plugin in dispatcher
     plugin_opts = dict(smtp="smtp.google.com", username="testUser",
@@ -90,7 +90,7 @@ def test_load_plugin(dispatcher):
 
 
 def test_load_subclassed_plugin(dispatcher):
-    plugin = load_plugin('subclassed_plugin', path="%s.plugins" % __package__,
+    plugin = load_plugin('subclassed_plugin', path='atgmlogger/tests/plugins/subclassed_plugin.py',
                          register=False)
     assert plugin not in dispatcher
     inst = plugin()

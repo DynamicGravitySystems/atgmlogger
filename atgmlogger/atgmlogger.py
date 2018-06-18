@@ -16,9 +16,10 @@ import logging
 import logging.config
 import signal
 import threading
+from types import ModuleType
 from pathlib import Path
 from importlib import import_module
-from importlib.util import find_spec
+from importlib.util import spec_from_file_location
 
 import serial
 
@@ -43,10 +44,11 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     ----------
     name : str
         Plugin module name (e.g. gpio for module file named gpio.py)
-    path : str
+    path : str, optional
         Alternate path to load module from, otherwise the default is to load
         from __package__.plugins
     register : bool
+        If true, loaded plugin will be registered in the Dispatcher Singleton
 
     Raises
     ------
@@ -66,40 +68,37 @@ def load_plugin(name, path=None, register=True, **plugin_params):
 
     # Experimental external path loading
     if path:
-        sys.path.insert(0, '/etc/atgmlogger')
-        spec = find_spec('plugins', '/etc/atgmlogger/')
-        # Try spec_from_file_location (maybe don't need sys.path.insert method
-        plugin_mod = spec.loader.load_module()
         try:
-            plugin = import_module('.%s' % name, package=spec.name)
+            spec = spec_from_file_location(name, path)
+            plugin = spec.loader.create_module(spec)
+            if plugin is None:
+                plugin = ModuleType(name=name)
 
+            spec.loader.exec_module(plugin)
+        except AttributeError:
+            raise ImportError
+        else:
+            klass = getattr(plugin, '__plugin__', None)
+    else:
+        try:
+            pkg_name = "%s.plugins" % __package__.split('.')[0]
+            plugin = import_module(".%s" % name, package=pkg_name)
         except ImportError:
-            pass
+            raise
+        else:
+            klass = getattr(plugin, '__plugin__', None)
 
+    if klass is None:
+        raise ImportError('Plugin has no __plugin__ attribute.')
 
-
-
-
-    # End Experimental Feature
-
-    try:
-        pkg_name = "%s.plugins" % __package__.split('.')[0]
-        plugin = import_module(".%s" % name, package=pkg_name)
-    except ImportError:
-        raise
-
-    try:
-        klass = getattr(plugin, '__plugin__')
-    except AttributeError:
-        raise ImportError("__plugin__ is not defined in plugin module %s." % name)
     if isinstance(klass, str):
         klass = getattr(plugin, klass)
     if klass is None:
         raise ImportError("__plugin__ is None in plugin module %s." % name)
     if not issubclass(klass, PluginInterface) and not issubclass(klass, PluginDaemon):
+        # Attempt to create subclass of PluginInterface with imported plugin
         klass = type(name, (klass, PluginInterface), {})
     if register:
-        # from .dispatcher import Dispatcher
         Dispatcher.register(klass, **plugin_params)
 
     return klass

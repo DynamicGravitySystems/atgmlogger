@@ -3,12 +3,12 @@
 import pytest
 from pathlib import Path
 
-from atgmlogger.plugins import load_plugin, PluginDaemon
+from atgmlogger.atgmlogger import load_plugin, PluginDaemon
 
 
 @pytest.fixture
 def usb_plugin():
-    klass = load_plugin('usb', path='atgmlogger.plugins', register=False)
+    klass = load_plugin('usb', register=False)
     return klass
 
 

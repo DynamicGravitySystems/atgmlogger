@@ -7,7 +7,7 @@ import logging
 import threading
 from importlib import import_module
 
-__all__ = ['PluginInterface', 'PluginDaemon', 'load_plugin']
+__all__ = ['PluginInterface', 'PluginDaemon']
 LOG = logging.getLogger(__name__)
 
 
