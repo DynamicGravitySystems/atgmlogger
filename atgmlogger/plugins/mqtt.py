@@ -115,35 +115,20 @@ Marine Data Fields/Sample
 $UW,20083,-1369,-940,5104887,252,466,212,4502,400,-24,-16,4430,5128453,39.9092261667,-105.0747506667,0.0040330.9400,20171206173348
 $UW,-9696,-7781,4628,4118252,257,409,199,32888,128,73,-42,4362,4139315,39.9092032667,-105.0747801500,0.0000,0.0000,00000000000022
 
-
 """
 
 
-def get_timestamp(fields):
-    timestamp = datetime.utcnow().timestamp()
-    if len(fields) == 13:
-        # Assume Marine data - GPS week/second format
-        try:
-            week = int(fields[11])
-            seconds = float(fields[12])
-            timestamp = convert_gps_time(week, seconds)
-        except ValueError:
-            LOG.exception("Exception resolving timestamp from fields: " + ','.join(fields))
-    elif len(fields) == 19:
-        # Assume Airborne data - YMD format
-        date = str(fields[18])
-        fmt = "%Y%m%d%H%M%S"
-        try:
-            timestamp = datetime.strptime(date, fmt).timestamp()
-        except ValueError:
-            timestamp = datetime.utcnow().timestamp()
-
-    return timestamp
+def convert_time(meter_time):
+    fmt = '%Y%m%d%H%M%S'
+    try:
+        return datetime.strptime(meter_time, fmt).timestamp()
+    except ValueError:
+        return datetime.utcnow().timestamp()
 
 
 class MQTTClient(PluginInterface):
     options = ['sensorid', 'topicid', 'topic_pfx', 'endpoint', 'rootca', 'prikey', 'devcert', 'batch', 'interval',
-               'fields']
+               'fields', 'datafmt']
     topic_pfx = 'gravity'
     endpoint = None
     rootca = 'root-CA.crt'
@@ -151,11 +136,23 @@ class MQTTClient(PluginInterface):
     devcert = 'iot.cert.pem'
     interval = 1
     fields = ['gravity', 'long', 'cross', 'latitude', 'longitude', 'datetime']
+    datafmt = 'marine'
 
     # Ordered list of marine fields
     _marine_fieldmap = ['header', 'gravity', 'long', 'cross', 'beam', 'temp', 'pressure', 'etemp', 'vcc', 've', 'al',
                         'ax', 'status', 'checksum', 'latitude', 'longitude', 'speed', 'course', 'datetime']
     _airborne_fieldmap = []
+
+    # Defaults to integer cast if not specified here
+    _field_casts = {
+        'header': str,
+        'gravity': float,
+        'latitude': float,
+        'longitude': float,
+        'speed': float,
+        'course': float,
+        'datetime': convert_time
+    }
 
     def __init__(self):
         super().__init__()
@@ -172,7 +169,10 @@ class MQTTClient(PluginInterface):
         data = data.split(',')
         for i, field in enumerate(fieldmap):
             if field.lower() in cls.fields:
-                extracted[field] = data[i]
+                try:
+                    extracted[field] = cls._field_casts.get(field.lower(), int)(data[i])
+                except ValueError:
+                    extracted[field] = data[i]
         return extracted
 
     @staticmethod
@@ -221,7 +221,7 @@ class MQTTClient(PluginInterface):
                 try:
                     self.tick = 0  # reset tick count
                     fields = item.split(',')
-                    timestamp = get_timestamp(fields)
+                    timestamp = convert_time(fields[-1])
                     if not len(fields):
                         continue
 
