@@ -6,7 +6,7 @@ import logging
 import argparse
 from pathlib import Path
 
-from . import __description__, __version__, LOG_LVLMAP
+from . import __description__, __version__, LOG_LVLMAP, LOG_FMT, DATE_FMT, TRACE_LOG_FMT
 
 LOG = logging.getLogger('atgmlogger')
 
@@ -66,6 +66,26 @@ def parse_args(argv=None):
     return parser.parse_args(args)
 
 
+def _configure_applog(log_format, logdir):
+    logdir = Path(logdir)
+    if not logdir.exists():
+        try:
+            logdir.mkdir(parents=True, mode=0o750)
+        except (FileNotFoundError, OSError):
+            LOG.warning("Log directory could not be created, log "
+                        "files will be output to current directory (%s).",
+                        str(Path().resolve()))
+            logdir = Path()
+
+    from logging.handlers import WatchedFileHandler
+
+    applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
+                                     encoding='utf-8')
+    applog_hdlr.setFormatter(logging.Formatter(log_format, datefmt=DATE_FMT))
+    LOG.addHandler(applog_hdlr)
+    LOG.debug("Application log configured, log path: %s", str(logdir))
+
+
 def initialize(args):
     """Initialize global application params and/or execute install/uninstall methods"""
     if args.debug:
@@ -82,7 +102,6 @@ def initialize(args):
             LOG.error("Command %s is not implemented", args.command)
             sys.exit(1)
         sys.exit(method(args))
-
 
     # if args.command == 'install':
     #     try:
@@ -119,9 +138,15 @@ def initialize(args):
     if args.logdir:
         rcParams['logging.logdir'] = args.logdir
         LOG.info("Updated logging directories, new datafile path: %s",
-                 rcParams['logging.handlers.data_hdlr.filename'])
+                 rcParams['logging.logdir'])
     if args.mountdir:
         rcParams['usb.mount'] = args.mountdir
+
+    # Configure Root Application Logger
+    if args.trace:
+        _configure_applog(TRACE_LOG_FMT, rcParams['logging.logdir'])
+    else:
+        _configure_applog(LOG_FMT, rcParams['logging.logdir'])
 
     return args
 
@@ -132,3 +157,7 @@ def entry_point():
     from .atgmlogger import atgmlogger
 
     sys.exit(atgmlogger(args))
+
+
+if __name__ == '__main__':
+    entry_point()

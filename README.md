@@ -74,8 +74,9 @@ Dynamic Gravity Systems - Serial Data Recorder
 3. Installation:
     - The atgmlogger utility is now packaged as a Python Wheel and can be installed via pip:
     ```commandline
-    sudo pip3 install atgmlogger-0.3.1-py3-none-any.whl
-    ```	
+    sudo pip3 install atgmlogger-x.x.x-py3-none-any.whl
+    ```
+ 
     This method will create a commandline script in /usr/bin/atgmlogger, which can be invoked to run the logger.
 	
 

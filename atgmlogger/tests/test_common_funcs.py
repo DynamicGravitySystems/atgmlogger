@@ -87,7 +87,7 @@ def test_config(cfg_dict):
     cfg = _ConfigParams(config=cfg_dict)
 
     # Test config getter with arbitrary depths
-    assert cfg['usb.copy_level'] == "debug"
+    assert cfg['plugins.usb.logdir'] == "/var/log/atgmlogger"
     assert isinstance(cfg['serial'], dict)
 
     # Test setting arbitrary values in config
@@ -107,7 +107,7 @@ def test_fallback_config(cfg_dict):
     cfg = _ConfigParams()
     # Selectively exclude logging node due to filepath expansion
     # Don't feel like fixing that yet.
-    for node in ['version', 'serial', 'usb']:
+    for node in ['version', 'serial', 'plugins']:
         assert cfg[node] == cfg_dict[node]
 
 

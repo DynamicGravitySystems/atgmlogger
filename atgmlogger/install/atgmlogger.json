@@ -1,5 +1,8 @@
 {
   "version": 0.4,
+  "sensor": {
+    "name": "AT1M-10"
+  },
   "serial": {
     "port": "/dev/serial0",
     "baudrate": 57600,
@@ -9,10 +12,6 @@
   },
   "logging": {
     "logdir": "/var/log/atgmlogger"
-  },
-  "usb": {
-    "mount": "/media/removable",
-    "copy_level": "debug"
   },
   "plugins": {
     "gpio": {
@@ -24,7 +23,7 @@
     "usb": {
         "mountpath": "/media/removable",
         "logdir": "/var/log/atgmlogger",
-        "patterns": ["*.dat", "*.log", "*.gz"]
+        "patterns": ["*.dat", "*.dat.*", "*.log", "*.gz"]
     },
     "timesync": {
         "interval": 1000

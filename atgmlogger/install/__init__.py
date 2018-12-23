@@ -22,7 +22,7 @@ LOG.setLevel(logging.WARNING)
 LOG.addHandler(logging.FileHandler('install.log', encoding='utf-8'))
 
 _SERVICE_NAME = "atgmlogger.service"
-_MOUNT_NAME = "removable-storage.mount"
+_MOUNT_NAME = "media-removable.mount"
 _UNIT_PATH = '/etc/systemd/system/'
 _UDEV_PATH = '/etc/udev/rules.d/'
 
@@ -105,7 +105,7 @@ def _install_service_units(execstart=None, environment=None, workingdir=None, us
         execstart=execstart, workingdir=workingdir, environment=environment))
 
     LOG.info("Writing removable storage device UDEV rule to %s", _UDEV_PATH)
-    removable_udev = 'ACTION="add", KERNEL=="sd?1", SUBSYSTEMS=="block", SYMLINK+="usbstick"'
+    removable_udev = 'ACTION=="add", KERNEL=="sd?1", SUBSYSTEMS=="block", SYMLINK+="usbstick"'
     _write_str(os.path.join(_UDEV_PATH, '90-removable.rules'), removable_udev)
 
     removable_mount = """
@@ -126,7 +126,7 @@ def _install_service_units(execstart=None, environment=None, workingdir=None, us
     _write_str(os.path.join(_UNIT_PATH, _MOUNT_NAME), removable_mount)
 
 
-def _install_logrotate_config(log_path=None):
+def _install_logrotate_config(log_path=None, keep=90):
     # Create atgmlogger logrotate file in /etc/logrotate.d/atgmlogger
     # If atgmlogger config is dropped above, no further action needed as
     # there should already be a daily logrotate cron entry
@@ -150,11 +150,11 @@ def _install_logrotate_config(log_path=None):
     {logpath}/*.log {{
         missingok
         notifempty
-        daily
+        size 100k
         dateext
         dateyesterday
         dateformat .%Y-%m-%d
-        rotate 30
+        rotate 12
         compress
     }}
     {logpath}/*.dat {{
@@ -164,11 +164,12 @@ def _install_logrotate_config(log_path=None):
         dateext
         dateyesterday
         dateformat .%Y-%m-%d
-        rotate 30
-        compress
+        rotate {keep}
         {postrotate}
     }}
-    """.format(logpath=str(log_path.resolve()), postrotate=postscript)
+    """.format(logpath=str(log_path.resolve()),
+               keep=keep,
+               postrotate=postscript)
     LOG.info("Installing logrotate configuration in %s", str(dest_path))
     _write_str(str(dest_path), config)
 
@@ -180,7 +181,7 @@ def _chk_boot_config():
 
 def _chk_cmdline_config():
     with open('/boot/cmdline.txt', 'r') as fd:
-        return not 'console=serial0,115200' in fd.read()
+        return 'console=serial0,115200' not in fd.read()
 
 
 def _configure_rpi():

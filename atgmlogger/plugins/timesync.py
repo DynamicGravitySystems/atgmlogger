@@ -109,10 +109,10 @@ def set_system_time(timestamp):
 
 
 class TimeSyncDaemon(PluginDaemon):
-    options = ['interval', 'timetravel']
+    options = ['interval', 'monotonic']
     interval = 1000
     _tick = -1
-    timetravel = False
+    monotonic = True
 
     @classmethod
     def condition(cls, item=None):
@@ -126,7 +126,7 @@ class TimeSyncDaemon(PluginDaemon):
         cls._tick = 0
 
     def _valid_time(self, timestamp):
-        if not self.timetravel and timestamp > time.time():
+        if self.monotonic and timestamp > time.time():
             LOG.debug("Timestamp is valid, {ts} > {now}".format(
                 ts=timestamp, now=time.time()))
             return True

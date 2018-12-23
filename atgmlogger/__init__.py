@@ -6,7 +6,7 @@ import logging
 __all__ = ['LOG_LVLMAP', 'LOG_FMT', 'SIMPLE_LOG_FMT', 'TRACE_LOG_FMT', 'DATE_FMT', 'POSIX',
            '__version__', '__description__']
 
-__version__ = "0.4.2-alpha.1"
+__version__ = "0.5.0-alpha.1"
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
 
 
@@ -32,3 +32,8 @@ if sys.platform.lower().startswith("linux"):
     POSIX = True
 else:
     POSIX = False
+
+
+_changes = {
+    '0.5.0-alpha.1': 'Experimental build with support for streaming data to collector',
+}

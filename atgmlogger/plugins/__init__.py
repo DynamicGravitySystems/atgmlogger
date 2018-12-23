@@ -52,11 +52,6 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         for key, value in options.items():
             lkey = str(key).lower()
             if lkey in self.options:
-                if isinstance(self.options, dict):
-                    dtype = self.options[lkey]
-                    if not isinstance(value, dtype):
-                        print("Invalid option value provided for key: ", key)
-                        continue
                 setattr(self, lkey, value)
         self._configured = True
 
@@ -147,14 +142,6 @@ class PluginDaemon(threading.Thread, metaclass=abc.ABCMeta):
     def configure(cls, **options):
         for key, value in {str(k).lower(): v for k, v in options.items()
                            if k in cls.options}.items():
-            if isinstance(cls.options, dict):
-                dtype = cls.options[key]
-                if not isinstance(value, dtype):
-                    try:
-                        value = dtype(value)
-                    except TypeError:
-                        print("TypeError: invalid type provided for key: {}, "
-                              "should be {}".format(key, dtype))
             setattr(cls, key, value)
 
     @abc.abstractmethod

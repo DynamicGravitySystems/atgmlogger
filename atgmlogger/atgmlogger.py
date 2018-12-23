@@ -8,7 +8,6 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 
 """
 
-import sys
 import time
 import queue
 import itertools
@@ -16,10 +15,8 @@ import logging
 import logging.config
 import signal
 import threading
-from types import ModuleType
 from pathlib import Path
 from importlib import import_module
-from importlib.util import spec_from_file_location
 
 import serial
 
@@ -33,7 +30,7 @@ LOG = logging.getLogger('atgmlogger.main')
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
 
 
-def load_plugin(name, path=None, register=True, **plugin_params):
+def load_plugin(name, register=True, **plugin_params):
     """
     Load a runtime plugin from either the default module path
     (atgmlogger.plugins), or from the specified path.
@@ -44,9 +41,6 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     ----------
     name : str
         Plugin module name (e.g. gpio for module file named gpio.py)
-    path : str, optional
-        Alternate path to load module from, otherwise the default is to load
-        from __package__.plugins
     register : bool
         If true, loaded plugin will be registered in the Dispatcher Singleton
 
@@ -66,27 +60,13 @@ def load_plugin(name, path=None, register=True, **plugin_params):
 
     """
 
-    # Experimental external path loading
-    if path:
-        try:
-            spec = spec_from_file_location(name, path)
-            plugin = spec.loader.create_module(spec)
-            if plugin is None:
-                plugin = ModuleType(name=name)
-
-            spec.loader.exec_module(plugin)
-        except AttributeError:
-            raise ImportError
-        else:
-            klass = getattr(plugin, '__plugin__', None)
+    try:
+        pkg_name = "%s.plugins" % __package__.split('.')[0]
+        plugin = import_module(".%s" % name, package=pkg_name)
+    except ImportError:
+        raise
     else:
-        try:
-            pkg_name = "%s.plugins" % __package__.split('.')[0]
-            plugin = import_module(".%s" % name, package=pkg_name)
-        except ImportError:
-            raise
-        else:
-            klass = getattr(plugin, '__plugin__', None)
+        klass = getattr(plugin, '__plugin__', None)
 
     if klass is None:
         raise ImportError('Plugin has no __plugin__ attribute.')
@@ -206,27 +186,6 @@ class SerialListener:
         return decoded
 
 
-# TODO: Move some/all of this functionality into __main__ initialize function
-def _configure_applog(log_format):
-    logdir = Path(rcParams['logging.logdir'])
-    if not logdir.exists():
-        try:
-            logdir.mkdir(parents=True, mode=0o750)
-        except (FileNotFoundError, OSError):
-            LOG.warning("Log directory could not be created, log "
-                        "files will be output to current directory (%s).",
-                        str(Path().resolve()))
-            logdir = Path()
-
-    from logging.handlers import WatchedFileHandler
-
-    applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
-                                     encoding='utf-8')
-    applog_hdlr.setFormatter(logging.Formatter(log_format, datefmt=DATE_FMT))
-    LOG.addHandler(applog_hdlr)
-    LOG.debug("Application log configured, log path: %s", str(logdir))
-
-
 def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     """Loads plugin and returns instance of Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
@@ -281,12 +240,6 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     """
     # Init Performance Counter
     t_start = time.perf_counter()
-
-    # TODO: Again candidate to move into __main__::initialize
-    fmt = LOG_FMT
-    if args.trace:
-        fmt = TRACE_LOG_FMT
-    _configure_applog(fmt)
 
     if listener is None:
         listener = SerialListener(handle or _get_handle())

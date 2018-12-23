@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
+# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
+import json
 import os
 import re
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import List
 
 from . import PluginDaemon
+from .. import runconfig
 
 __plugin__ = 'RemovableStorageHandler'
 CHECK_PLATFORM = True
@@ -36,7 +38,7 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
         not been synchronized to GPS time
     prefix : str, Optional
         Optional prefix to pre-pend to the directory name
-        Prefix will be trimmed to length of 5
+        Prefix will be trimmed to length of 8
     datefmt : str, Optional
         Optional override default strftime date/time format
 
@@ -52,7 +54,7 @@ def get_dest_dir(scheme='date', prefix=None, datefmt='%y%m%d-%H%M'):
     else:
         dir_name = time.strftime(datefmt+'UTC', time.gmtime(time.time()))
     if prefix:
-        dir_name = prefix[:5]+dir_name
+        dir_name = prefix[:8]+dir_name
 
     illegals = frozenset('\\:<>?*/\"')  # Known illegal characters
     dir_name = "".join([c for c in dir_name if c not in illegals])
@@ -89,7 +91,7 @@ def _filehook(pattern):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
             return func(self, *args, **kwargs)
-        wrapper.filehook = re.compile(pattern)
+        wrapper.filehook = re.compile(pattern, re.IGNORECASE)
         return wrapper
     return inner
 
@@ -99,14 +101,14 @@ class RemovableStorageHandler(PluginDaemon):
 
     mountpath = Path('/media/removable')
     logdir = Path('/var/log/atgmlogger')
-    patterns = ['*.dat', '*.log', '*.gz']
+    patterns = ['*.dat', '*.dat.*', '*.log', '*.gz']
 
     @classmethod
     def condition(cls, *args):
         return os.path.ismount(str(cls.mountpath))
 
     def __init__(self, **kwargs):
-        LOG.debug("Initializing RSH")
+        LOG.debug("Initializing RemovableStorageHandler")
         super().__init__(**kwargs)
 
         self._current_path = None
@@ -179,7 +181,8 @@ class RemovableStorageHandler(PluginDaemon):
             LOG.warning("Total size of datafiles to be copied is greater "
                         "than free-space on device.")
 
-        dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix='DATA-'))
+        pfx = runconfig.rcParams['sensor.name'] or 'DATA'
+        dest_dir = self.mountpath.resolve().joinpath(get_dest_dir(prefix=pfx))
         try:
             dest_dir.mkdir()
         except FileExistsError:
@@ -255,6 +258,8 @@ class RemovableStorageHandler(PluginDaemon):
         dt = time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(
             time.time()))
         result = 'Diagnostic Results ({dt}):\n\n'.format(dt=dt)
+        from .. import __version__
+        result += 'ATGMLogger Version: ' + __version__
 
         commands = ['uptime', 'vcgencmd measure_temp', 'top -b -n1', 'df -H',
                     'free -h', 'dmesg']
@@ -298,4 +303,22 @@ class RemovableStorageHandler(PluginDaemon):
         rcParams.dump(path=base_path, exist_ok=True)
         LOG.info("New configuration file loaded from USB device. Changes "
                  "will not take effect until restart.")
+
+    @_filehook(r'logrotate\.?(conf)?')
+    def set_logrotate(self, match: Path):
+        """Update atgmlogger logrotate conf file."""
+        # TODO: Make this work
+        with match.open('r') as fd:
+            try:
+                rotate_conf = json.loads(fd.read())
+            except Exception as e:
+                LOG.exception("Failed to read logrotate update.")
+                return
+
+        try:
+            from .. install import _install_logrotate_config
+        except ImportError:
+            LOG.exception("Failed to import logrotate config ")
+            return
+
 
