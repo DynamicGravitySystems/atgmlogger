@@ -7,7 +7,7 @@ import logging
 import threading
 from importlib import import_module
 
-__all__ = ['PluginInterface', 'PluginDaemon']
+__all__ = ['PluginInterface', 'PluginDaemon', 'load_plugin']
 LOG = logging.getLogger(__name__)
 
 
@@ -149,3 +149,53 @@ class PluginDaemon(threading.Thread, metaclass=abc.ABCMeta):
         pass
 
 
+def load_plugin(name):
+    """
+    Load a runtime plugin from either the default module path
+    (atgmlogger.plugins), or from the specified path.
+    Optionally register the newly imported plugin with the dispatcher class,
+    passing specified keyword arguments 'plugin_params'
+
+    Parameters
+    ----------
+    name : str
+        Plugin module name (e.g. gpio for module file named gpio.py)
+    register : bool
+        If true, loaded plugin will be registered in the Dispatcher Singleton
+
+    Raises
+    ------
+    AttributeError
+        If plugin module does not have __plugin__ atribute defined
+    ImportError, ModuleNotFoundError
+        If plugin cannot be found or error importing plugin
+
+    Returns
+    -------
+    Plugin class as defined by the module attribue __plugin__ if the plugin
+    directly subclasses ModuleInterface.
+    else, an empty adapter class is constructed with the plugin class and
+    ModuleInterface as its base classes.
+
+    """
+
+    try:
+        pkg_name = "%s.plugins" % __package__.split('.')[0]
+        plugin = import_module(".%s" % name, package=pkg_name)
+    except ImportError:
+        raise
+    else:
+        klass = getattr(plugin, '__plugin__', None)
+
+    if klass is None:
+        raise ImportError('Plugin has no __plugin__ attribute.')
+
+    if isinstance(klass, str):
+        klass = getattr(plugin, klass)
+    if klass is None:
+        raise ImportError("__plugin__ is None in plugin module %s." % name)
+    if not issubclass(klass, PluginInterface) and not issubclass(klass, PluginDaemon):
+        # Attempt to create subclass of PluginInterface with imported plugin
+        klass = type(name, (klass, PluginInterface), {})
+
+    return klass

@@ -11,77 +11,21 @@ Gravity Systems' (DGS) AT1A and AT1M advanced technology gravity meters.
 import time
 import queue
 import itertools
-import logging
 import logging.config
 import signal
 import threading
 from pathlib import Path
-from importlib import import_module
 
 import serial
 
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
-from .plugins import PluginInterface, PluginDaemon
-from . import POSIX, LOG_FMT, TRACE_LOG_FMT, DATE_FMT
+from .plugins import load_plugin
+from . import POSIX
 
 
 LOG = logging.getLogger('atgmlogger.main')
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
-
-
-def load_plugin(name, register=True, **plugin_params):
-    """
-    Load a runtime plugin from either the default module path
-    (atgmlogger.plugins), or from the specified path.
-    Optionally register the newly imported plugin with the dispatcher class,
-    passing specified keyword arguments 'plugin_params'
-
-    Parameters
-    ----------
-    name : str
-        Plugin module name (e.g. gpio for module file named gpio.py)
-    register : bool
-        If true, loaded plugin will be registered in the Dispatcher Singleton
-
-    Raises
-    ------
-    AttributeError
-        If plugin module does not have __plugin__ atribute defined
-    ImportError, ModuleNotFoundError
-        If plugin cannot be found or error importing plugin
-
-    Returns
-    -------
-    Plugin class as defined by the module attribue __plugin__ if the plugin
-    directly subclasses ModuleInterface.
-    else, an empty adapter class is constructed with the plugin class and
-    ModuleInterface as its base classes.
-
-    """
-
-    try:
-        pkg_name = "%s.plugins" % __package__.split('.')[0]
-        plugin = import_module(".%s" % name, package=pkg_name)
-    except ImportError:
-        raise
-    else:
-        klass = getattr(plugin, '__plugin__', None)
-
-    if klass is None:
-        raise ImportError('Plugin has no __plugin__ attribute.')
-
-    if isinstance(klass, str):
-        klass = getattr(plugin, klass)
-    if klass is None:
-        raise ImportError("__plugin__ is None in plugin module %s." % name)
-    if not issubclass(klass, PluginInterface) and not issubclass(klass, PluginDaemon):
-        # Attempt to create subclass of PluginInterface with imported plugin
-        klass = type(name, (klass, PluginInterface), {})
-    if register:
-        Dispatcher.register(klass, **plugin_params)
-
-    return klass
 
 
 class SerialListener:
@@ -196,17 +140,19 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
     dispatcher.register(DataLogger, logfile=logfile)
 
-    plugins = plugins or rcParams['plugins']
-    if plugins is not None:
-        for plugin in plugins:
-            try:
-                load_plugin(plugin, register=True, **plugins[plugin])
-                LOG.info("Loaded plugin: %s", plugin)
-            except ImportError:  # ModuleNotFoundError not implemented until py3.6
-                if verbosity is not None and verbosity >= 2:
-                    LOG.exception("Plugin <%s> could not be loaded. Continuing.", plugin)
-                else:
-                    LOG.warning("Plugin <%s> could not be loaded. Continuing.", plugin)
+    plugins = plugins or rcParams['plugins'] or []
+    for plugin in plugins:
+        try:
+            klass = load_plugin(plugin)
+            dispatcher.register(klass, **plugins[plugin])
+            # load_plugin(plugin, register=True, **plugins[plugin])
+            LOG.info("Loaded plugin: %s", plugin)
+        except ImportError:
+            # Note: ModuleNotFoundError is not implemented until py3.6
+            if verbosity is not None and verbosity >= 2:
+                LOG.exception("Plugin <%s> could not be loaded. Continuing.", plugin)
+            else:
+                LOG.warning("Plugin <%s> could not be loaded. Continuing.", plugin)
     return dispatcher
 
 
