@@ -130,8 +130,8 @@ class SerialListener:
         return decoded
 
 
-def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
-    """Loads plugin and returns instance of Dispatcher"""
+def _init_dispatcher(collector=None, plugins=None, verbosity=0):
+    """Loads plugin(s) and returns initialized Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
 
     # Explicitly import and register the DataLogger 'plugin'
@@ -140,8 +140,7 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
     dispatcher.register(DataLogger, logfile=logfile)
 
-    plugins = plugins or rcParams['plugins'] or []
-    for plugin in plugins:
+    for plugin in plugins or []:
         try:
             klass = load_plugin(plugin)
             dispatcher.register(klass, **plugins[plugin])
@@ -150,19 +149,21 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
         except ImportError:
             # Note: ModuleNotFoundError is not implemented until py3.6
             if verbosity is not None and verbosity >= 2:
-                LOG.exception("Plugin <%s> could not be loaded. Continuing.", plugin)
+                LOG.exception("Plugin <%s> could not be loaded. Continuing.",
+                              plugin)
             else:
-                LOG.warning("Plugin <%s> could not be loaded. Continuing.", plugin)
+                LOG.warning("Plugin <%s> could not be loaded. Continuing.",
+                            plugin)
     return dispatcher
 
 
-def _get_handle():
-    if '://' in str(rcParams['serial.port']).lower():
-        params = rcParams['serial']
-        url = params.pop('port')
-        hdl = serial.serial_for_url(url=url, **params)
+def _get_handle(**params):
+    """Return a serial handle from a url string or device name"""
+    url_or_dev = params.pop('port')
+    if '://' in str(url_or_dev).lower():
+        hdl = serial.serial_for_url(url=url_or_dev, **params)
     else:
-        hdl = serial.Serial(**rcParams['serial'])
+        hdl = serial.Serial(port=url_or_dev, **params)
     return hdl
 
 
@@ -188,9 +189,11 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     t_start = time.perf_counter()
 
     if listener is None:
-        listener = SerialListener(handle or _get_handle())
-    dispatcher = dispatcher or _get_dispatcher(collector=listener.collector,
-                                               verbosity=args.verbose)
+        listener = SerialListener(handle or _get_handle(**rcParams['serial']))
+    dispatcher = dispatcher or _init_dispatcher(collector=listener.collector,
+                                                plugins=rcParams.get('plugins',
+                                                                     None),
+                                                verbosity=args.verbose)
 
     # End Init Performance Counter
     t_end = time.perf_counter()

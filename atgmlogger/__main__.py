@@ -131,8 +131,7 @@ def initialize(args):
     if args.config:
         # This must come first as it will re-initialize the configuration class
         LOG.info("Reloading rcParams with config file: %s", args.config)
-        with Path(args.config).open('r') as fd:
-            rcParams.load_config(fd)
+        rcParams.load_config(args.config)
     if args.device:
         rcParams['serial.port'] = args.device
     if args.logdir:
