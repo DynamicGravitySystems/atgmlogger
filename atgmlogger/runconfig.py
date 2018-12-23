@@ -5,32 +5,10 @@ import copy
 import json
 import logging
 from collections import UserDict
-from io import TextIOWrapper
 from pathlib import Path
-from typing import Dict
 
 __all__ = ['rcParams']
-_base = __name__.split('.')[0]
 LOG = logging.getLogger(__name__)
-
-
-# EXAMPLE loading from package data
-
-# LOG.warning("No configuration file could be located, "
-#             "attempting to load default.")
-# LOG.warning("Execute with --install option to install "
-#             "default configuration files.")
-# try:
-#     import pkg_resources as pkg
-#     rawfd = pkg.resource_stream(_base + '.install',
-#                                 self.cfg_name)
-#     text_wrapper = TextIOWrapper(rawfd, encoding='utf-8')
-#
-#     self.load_config(text_wrapper)
-# except IOError:
-#     LOG.exception("Error loading default configuration.")
-# else:
-#     LOG.info("Successfully loaded default configuration.")
 
 
 class RunConfig(UserDict):
@@ -78,12 +56,14 @@ class RunConfig(UserDict):
             branch = branch.setdefault(segment, {})
         branch[last] = value
 
-    def load_config(self, path: Path):
+    def load_config(self, path: Path) -> None:
+        """Reload and replace existing configuration from file path"""
         try:
             with path.open('r') as fd:
                 config = json.load(fd)
         except json.JSONDecodeError:
-            LOG.exception('Error loading config from JSON')
+            LOG.exception('Error loading config from JSON. Retaining existing '
+                          'configuration.')
         else:
             self.data = config
             self.path = path

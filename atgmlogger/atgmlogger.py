@@ -205,8 +205,7 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
             # Note: Signal handler must be defined in main thread
             signal.signal(signal.SIGHUP, lambda sig, frame: dispatcher.log_rotate())
         dispatcher.start()
-        # print(logging.Logger.manager.loggerDict.keys())
-        listener()
+        listener.listen()
     except KeyboardInterrupt:
         LOG.info("Keyboard Interrupt intercepted, cleaning up and exiting.")
         listener.exit()
