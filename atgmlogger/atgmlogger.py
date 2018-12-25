@@ -167,7 +167,7 @@ def _get_handle(**params):
     return hdl
 
 
-def atgmlogger(args, listener=None, handle=None, dispatcher=None):
+def atgmlogger(verbosity=2, listener=None, handle=None, dispatcher=None):
     """
     Main execution method, expects args passed from a Namespace created
     by an argparse class.
@@ -176,8 +176,8 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
 
     Parameters
     ----------
-    args : Namespace
-        Namespace containing parsed commandline arguments.
+    verbosity : int
+        Verbosity level for logging output
     listener : SerialListener
         Callable function/class with exit method
     handle : serial.Serial
@@ -193,11 +193,11 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     dispatcher = dispatcher or _init_dispatcher(collector=listener.collector,
                                                 plugins=rcParams.get('plugins',
                                                                      None),
-                                                verbosity=args.verbose)
+                                                verbosity=verbosity)
 
     # End Init Performance Counter
     t_end = time.perf_counter()
-    if args.verbose:
+    if verbosity:
         LOG.info("ATGMLogger started. Initialization time: %.4f", t_end - t_start)
     try:
         if POSIX:
