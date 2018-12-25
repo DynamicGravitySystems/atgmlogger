@@ -6,7 +6,8 @@ import threading
 import pytest
 
 from . import plugins  # needed for py3.6.2 for some reason
-from atgmlogger.atgmlogger import PluginInterface, load_plugin
+from atgmlogger.atgmlogger import load_plugin
+from atgmlogger.plugins import PluginInterface
 
 root_log = logging.getLogger()
 if len(root_log.handlers):
@@ -54,7 +55,6 @@ def test_dispatch_selective_load(dispatcher):
     from ._mock_plugins import BasicModule, ComplexModule, SimplePacket
     dispatcher.register(BasicModule)
     dispatcher.register(ComplexModule)
-    dispatcher.detach(ComplexModule)
     dispatcher.start()
     for i in range(Q_LEN):
         dispatcher.put(SimplePacket(i))
