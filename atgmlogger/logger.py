@@ -30,19 +30,20 @@ class DataLogger(PluginInterface):
         self._hdl = self.logfile.open(**self._params)
 
     def log_rotate(self):
-        """
-        Call this to notify the logger that logs may have been rotated by the
+        """Call this to notify the logger that logs may have been rotated by the
         system.
-        Flush, close then reopen the handle.
+
+        Flushes, closes, then reopens the current log/file handle.
 
         Returns
         -------
+        None
 
         """
         LOG.info("LogRotate signal received, re-opening log handle.")
         if self._hdl is None:
-            return
-
+            LOG.warning("No handle exists, will attempt to open.")
+            return self._get_fhandle()
         try:
             self._hdl.flush()
             self._hdl.close()
@@ -77,6 +78,9 @@ class DataLogger(PluginInterface):
                     self.queue.task_done()
             except IOError:
                 LOG.exception("IOError attempting to read/write data line")
+                continue
+            except Exception:
+                LOG.exception("Unexpected exception in logging thread.")
                 continue
         self._hdl.close()
 

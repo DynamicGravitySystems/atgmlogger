@@ -4,6 +4,7 @@
 import queue
 import logging
 import threading
+from typing import Dict, Type
 from weakref import WeakSet
 
 from .plugins import PluginInterface, PluginDaemon
@@ -29,6 +30,22 @@ class Dispatcher(threading.Thread):
     _params = {}
     _runlock = threading.Lock()
 
+    def __init__(self, collector=None, sig_exit=None):
+        super().__init__(name=self.__class__.__name__)
+        self.sig_exit = sig_exit or threading.Event()
+        self._queue = collector or queue.Queue()
+        self._threads = set()
+        self._active_daemons = WeakSet()
+        self._context = AppContext(self.message_queue)
+
+    @classmethod
+    def acquire_lock(cls, blocking=True):
+        return cls._runlock.acquire(blocking=blocking)
+
+    @classmethod
+    def release_lock(cls):
+        cls._runlock.release()
+
     @classmethod
     def register(cls, klass, **params):
         cls.acquire_lock()
@@ -52,42 +69,6 @@ class Dispatcher(threading.Thread):
                      str(klass))
         cls.release_lock()
         return klass
-
-    @classmethod
-    def detach(cls, klass):
-        LOG.debug("Attempting to detach %s", str(klass))
-        if klass in cls._listeners:
-            cls._listeners.remove(klass)
-            del cls._params[klass]
-        elif klass in cls._daemons:
-            cls._daemons.remove(klass)
-
-    @classmethod
-    def detach_all(cls):
-        cls._listeners.clear()
-        cls._daemons.clear()
-        cls._params = {}
-
-    @classmethod
-    def acquire_lock(cls, blocking=True):
-        return cls._runlock.acquire(blocking=blocking)
-
-    @classmethod
-    def release_lock(cls):
-        cls._runlock.release()
-
-    def __init__(self, collector=None, sigExit=None):
-        super().__init__(name=self.__class__.__name__)
-        self.sigExit = sigExit or threading.Event()
-        self._queue = collector or queue.Queue()
-        self._threads = set()
-        self._active_daemons = WeakSet()
-        self._context = AppContext(self.message_queue)
-        self._tick = 0
-
-    @classmethod
-    def __contains__(cls, item):
-        return item in cls._listeners or item in cls._daemons
 
     @property
     def message_queue(self):
@@ -168,10 +149,9 @@ class Dispatcher(threading.Thread):
             if isinstance(obj, klass):
                 return obj
 
-    def log_rotate(self):
-        """Call this method to notify any subscriber threads that logs have
-        been rotated, and handles may need to be recreated."""
-        self.put(Command('rotate'))
+    def signal(self, signal=CommandSignals.SIGHUP):
+        """Notify threads of a system signal or user defined event."""
+        self.put(Command(signal))
 
 
 class Blink:
