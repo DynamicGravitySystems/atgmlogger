@@ -6,7 +6,7 @@ import serial
 import threading
 from pathlib import Path
 
-from atgmlogger.runconfig import _ConfigParams
+from atgmlogger.runconfig import RunConfig
 from atgmlogger.dispatcher import Dispatcher
 
 
@@ -19,7 +19,7 @@ def cfg_dict(request):
 
 @pytest.fixture
 def rcParams():
-    return _ConfigParams(path='atgmlogger/install/atgmlogger.json')
+    return RunConfig(path=Path('atgmlogger/install/atgmlogger.json'))
 
 
 @pytest.fixture()
@@ -53,7 +53,6 @@ def dispatcher():
     yield disp
     if disp.is_alive():
         disp.exit(join=True)
-    disp.detach_all()
 
 
 @pytest.fixture(params=["/var/log/", Path("/var/log")])

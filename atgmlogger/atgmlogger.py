@@ -18,11 +18,11 @@ from pathlib import Path
 
 import serial
 
+from . import POSIX
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
 from .plugins import load_plugin
-from . import POSIX
-
+from .types import DataLine
 
 LOG = logging.getLogger('atgmlogger.main')
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
@@ -167,7 +167,7 @@ def _get_handle(**params):
     return hdl
 
 
-def atgmlogger(verbosity=2, listener=None, handle=None, dispatcher=None):
+def atgmlogger(verbosity=0, listener=None, handle=None, dispatcher=None):
     """
     Main execution method, expects args passed from a Namespace created
     by an argparse class.
@@ -185,25 +185,32 @@ def atgmlogger(verbosity=2, listener=None, handle=None, dispatcher=None):
     dispatcher : Dispatcher
 
     """
-    # Init Performance Counter
+    # Initialization Performance Counter
     t_start = time.perf_counter()
 
-    if listener is None:
-        listener = SerialListener(handle or _get_handle(**rcParams['serial']))
-    dispatcher = dispatcher or _init_dispatcher(collector=listener.collector,
-                                                plugins=rcParams.get('plugins',
-                                                                     None),
-                                                verbosity=verbosity)
+    # Initialize dependencies if not supplied
+    if handle is None:
+        handle = _get_handle(**rcParams['serial'])
 
-    # End Init Performance Counter
+    if listener is None:
+        listener = SerialListener(handle)
+
+    if dispatcher is None:
+        dispatcher = _init_dispatcher(collector=listener.collector,
+                                      plugins=rcParams.get('plugins', None),
+                                      verbosity=verbosity)
+
+    # End Initialization Performance Counter
     t_end = time.perf_counter()
     if verbosity:
-        LOG.info("ATGMLogger started. Initialization time: %.4f", t_end - t_start)
+        LOG.info("ATGMLogger started. Initialization time: %.4f",
+                 t_end - t_start)
     try:
         if POSIX:
-            # Listen for SIGHUP to tell logger that files have been rotated.
-            # Note: Signal handler must be defined in main thread
-            signal.signal(signal.SIGHUP, lambda sig, frame: dispatcher.log_rotate())
+            # Listen for SIGHUP to notify logger that files have been rotated.
+            # Note: Signal handlers must be defined in main thread (here)
+            signal.signal(signal.SIGHUP,
+                          lambda sig, frame: dispatcher.signal())
         dispatcher.start()
         listener.listen()
     except KeyboardInterrupt:

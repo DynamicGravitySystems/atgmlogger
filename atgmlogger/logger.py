@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from .plugins import PluginInterface
-from .dispatcher import Command
+from .types import Command, CommandSignals, DataLine
 
 __all__ = ['DataLogger']
 LOG = logging.getLogger(__name__)
@@ -62,16 +62,14 @@ class DataLogger(PluginInterface):
             LOG.exception("Error opening file for writing.")
             return
 
-        # TODO: Take sample of data, find the mode (freq) of
-        # transmission to set Blink frequency
         while not self.exiting:
             try:
                 item = self.get(block=True, timeout=None)
                 if item is None:
                     self.queue.task_done()
                     continue
-                if isinstance(item, Command):
-                    if item.cmd == 'rotate':
+                elif isinstance(item, Command):
+                    if item.cmd is CommandSignals.SIGHUP:
                         self.log_rotate()
                 else:
                     self._hdl.write(item + '\n')

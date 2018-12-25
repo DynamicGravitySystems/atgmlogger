@@ -7,6 +7,7 @@ import threading
 from weakref import WeakSet
 
 from .plugins import PluginInterface, PluginDaemon
+from .types import Command, CommandSignals, DataLine
 
 LOG = logging.getLogger(__name__)
 POLL_INTV = 1
@@ -185,12 +186,6 @@ class Blink:
         return self.priority < other.priority
 
 
-class Command:
-    def __init__(self, cmd, **params):
-        self.cmd = cmd
-        self.params = params
-
-
 class AppContext:
     def __init__(self, listener_queue):
         self._queue = listener_queue
@@ -199,12 +194,12 @@ class AppContext:
         cmd = Blink(led=led, frequency=freq)
         self._queue.put_nowait(cmd)
 
-    def blink_until(self, until: threading.Event=None, led='usb', freq=0.03):
+    def blink_until(self, until: threading.Event = None, led='usb', freq=0.03):
         # TODO: Possibly allow caller to pass event that the caller can set
         # to end the blink
         cmd = Blink(led=led, frequency=freq, continuous=True)
         self._queue.put_nowait(cmd)
 
     def log_rotate(self):
-        cmd = Command('logrotate')
+        cmd = Command(CommandSignals.SIGHUP)
         self._queue.put_nowait(cmd)
