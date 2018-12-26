@@ -7,6 +7,8 @@ import threading
 from typing import Dict, Type
 from weakref import WeakSet
 
+from .runconfig import rcParams
+from .logger import DataLogger
 from .plugins import PluginInterface, PluginDaemon
 from .types import Command, CommandSignals, DataLine
 
@@ -81,7 +83,12 @@ class Dispatcher(threading.Thread):
         self.acquire_lock(blocking=True)
         LOG.debug("Dispatcher run acquired runlock")
 
-        # Create perpetual listener threads
+        # Instantiate logger thread
+        logger = DataLogger(rcParams['logging.logdir'], self._context)
+        logger.start()
+        self._threads.add(logger)
+
+        # Create plugin threads
         plugin_type_map = {}
         for plugin in self._plugins:
             try:
@@ -107,6 +114,7 @@ class Dispatcher(threading.Thread):
             except queue.Empty:
                 item = None
             else:
+                logger.log(item)
                 for subscriber in plugin_type_map.get(type(item), set()):
                     subscriber.put(item)
                 self._queue.task_done()
@@ -144,11 +152,6 @@ class Dispatcher(threading.Thread):
         if join:
             self.join()
 
-    def get_instance_of(self, klass):
-        for obj in self._threads:
-            if isinstance(obj, klass):
-                return obj
-
     def signal(self, signal=CommandSignals.SIGHUP):
         """Notify threads of a system signal or user defined event."""
         self.put(Command(signal))
@@ -171,13 +174,13 @@ class AppContext:
         self._queue = listener_queue
 
     def blink(self, led='data', freq=0.04):
-        cmd = Blink(led=led, frequency=freq)
+        cmd = Command(Blink(led=led, frequency=freq))
         self._queue.put_nowait(cmd)
 
     def blink_until(self, until: threading.Event = None, led='usb', freq=0.03):
         # TODO: Possibly allow caller to pass event that the caller can set
         # to end the blink
-        cmd = Blink(led=led, frequency=freq, continuous=True)
+        cmd = Command(Blink(led=led, frequency=freq, continuous=True))
         self._queue.put_nowait(cmd)
 
     def log_rotate(self):

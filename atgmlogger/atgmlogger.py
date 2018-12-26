@@ -130,21 +130,14 @@ class SerialListener:
         return decoded
 
 
-def _init_dispatcher(collector=None, plugins=None, verbosity=0):
+def _init_dispatcher(collector: queue.Queue, plugins=None, verbosity=0):
     """Loads plugin(s) and returns initialized Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
-
-    # Explicitly import and register the DataLogger 'plugin'
-    from .logger import DataLogger
-
-    logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
-    dispatcher.register(DataLogger, logfile=logfile)
 
     for plugin in plugins or []:
         try:
             klass = load_plugin(plugin)
             dispatcher.register(klass, **plugins[plugin])
-            # load_plugin(plugin, register=True, **plugins[plugin])
             LOG.info("Loaded plugin: %s", plugin)
         except ImportError:
             # Note: ModuleNotFoundError is not implemented until py3.6
