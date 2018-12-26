@@ -87,7 +87,7 @@ class SerialListener:
             data = self.decode(self.readline())
             if data is None or data == '':
                 continue
-            self._queue.put_nowait(data)
+            self._queue.put_nowait(DataLine(data))
 
         LOG.debug("Exiting listener.listen() method, and closing serial "
                   "handle.")

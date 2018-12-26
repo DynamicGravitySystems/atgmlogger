@@ -24,7 +24,7 @@ class DataLogger(PluginInterface):
 
     @staticmethod
     def consumer_type():
-        return {str, Command}
+        return {str, Command, DataLine}
 
     def _get_fhandle(self):
         self._hdl = self.logfile.open(**self._params)
@@ -73,7 +73,10 @@ class DataLogger(PluginInterface):
                     if item.cmd is CommandSignals.SIGHUP:
                         self.log_rotate()
                 else:
-                    self._hdl.write(item + '\n')
+                    if isinstance(item, DataLine):
+                        self._hdl.write(item.data + '\n')
+                    else:
+                        self._hdl.write(item + '\n')
                     self.context.blink()
                     self.queue.task_done()
             except IOError:
