@@ -3,12 +3,12 @@
 import logging
 import threading
 import time
+from queue import Queue
 
-from atgmlogger.plugins import PluginInterface
-from atgmlogger.dispatcher import Blink
+from .types import Blink, Command
 
 LOG = logging.getLogger(__name__)
-
+__all__ = ['GPIOWorker']
 
 try:
     import RPi.GPIO as gpio
@@ -48,37 +48,34 @@ class _BlinkUntil(threading.Thread):
 # Limiting the queue might cause continuous blinks to be ignored if put with
 # nowait - this does cause random behavior where the continuous start signal
 # might be received but not the stop
-class GPIOListener(PluginInterface):
-    options = ['mode', 'data_pin', 'usb_pin', 'freq']
-
-    def __init__(self):
-        super().__init__()
+class GPIOWorker(threading.Thread):
+    def __init__(self, data_pin=11, usb_pin=13, freq=0.04, mode='board'):
+        super().__init__(name='GPIOListener')
         if not HAVE_GPIO:
             raise RuntimeError("GPIO Module is unavailable. GPIO plugin "
-                               "cannot run.")
-        self.outputs = []
-        self.modes = {'board': gpio.BOARD, 'bcm': gpio.BCM}
-        self.data_pin = 11
-        self.usb_pin = 13
-        self.freq = 0.04
+                               "cannot run. Module can be installed with "
+                               "`pip install RPi.GPIO`")
+        self.data_pin = data_pin
+        self.usb_pin = usb_pin
+        self.outputs = [self.data_pin, self.usb_pin]
+        self.freq = freq
 
         self._blink_until_sig = threading.Event()
-        # self.queue = queue.Queue(maxsize=20)
+        self.exit_sig = threading.Event()
+        self.queue = Queue()
 
-    @staticmethod
-    def consumer_type():
-        return {Blink}
-
-    def configure(self, **options):
-        super().configure(**options)
-        _mode = self.modes[getattr(self, 'mode', 'board')]
         gpio.setwarnings(False)
-        gpio.setmode(_mode)
+        gpio.setmode({'board': gpio.BOARD,
+                      'bcm': gpio.BCM}.get(mode, gpio.BOARD))
+        for output in self.outputs:
+            gpio.setup(output, gpio.OUT)
 
-        self.outputs = [getattr(self, pin) for pin in ['data_pin', 'usb_pin']
-                        if hasattr(self, pin)]
-        for pin in self.outputs:
-            gpio.setup(pin, gpio.OUT)
+    @property
+    def exiting(self) -> bool:
+        return self.exit_sig.is_set()
+
+    def send(self, item: Command):
+        self.queue.put_nowait(item)
 
     def _get_pin(self, name: str) -> int:
         if name.lower().startswith('data'):
@@ -116,11 +113,14 @@ class GPIOListener(PluginInterface):
         subthreads = dict()
 
         while not self.exiting:
-            blink = self.get()
-            if blink is None:
-                self.task_done()
+            cmd: Command = self.queue.get_nowait()
+            if isinstance(cmd.cmd, Blink):
+                blink = cmd.cmd
+            else:
+                self.queue.task_done()
                 continue
-            elif blink.until_stopped:
+
+            if blink.until_stopped:
                 if blink.led in subthreads:
                     # then stop the continuous blink
                     self._blink_until_sig.set()
@@ -137,7 +137,7 @@ class GPIOListener(PluginInterface):
                     del worker
             else:
                 self._blink(blink)
-                self.task_done()
+                self.queue.task_done()
 
         for pin in self.outputs:
             gpio.output(pin, False)

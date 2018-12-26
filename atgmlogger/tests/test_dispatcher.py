@@ -22,6 +22,12 @@ root_log.setLevel(LOG_LVL)
 BASE_PKG = 'atgmlogger'
 
 
+def get_dispatch_instance(dispatcher, klass):
+    for obj in dispatcher._threads:
+        if isinstance(obj, klass):
+            return obj
+
+
 def test_dispatch(dispatcher):
     """Test basic dispatcher functionality - discretionary pushing of
     received Queue items based on their type to registered listeners."""
@@ -39,8 +45,8 @@ def test_dispatch(dispatcher):
     dispatcher.exit(join=True)
     assert not dispatcher.is_alive()
 
-    bm = dispatcher.get_instance_of(BasicModule)
-    cm = dispatcher.get_instance_of(ComplexModule)
+    bm = get_dispatch_instance(dispatcher, BasicModule)
+    cm = get_dispatch_instance(dispatcher, ComplexModule)
     assert isinstance(bm, BasicModule)
     assert isinstance(cm, ComplexModule)
 
@@ -62,8 +68,8 @@ def test_dispatch_selective_load(dispatcher):
     dispatcher.exit(join=True)
     assert not dispatcher.is_alive()
 
-    bm = dispatcher.get_instance_of(BasicModule)
-    cm = dispatcher.get_instance_of(ComplexModule)
+    bm = get_dispatch_instance(dispatcher, BasicModule)
+    cm = get_dispatch_instance(dispatcher, ComplexModule)
     assert isinstance(bm, BasicModule)
     assert list(range(Q_LEN)) == bm.accumulator
 

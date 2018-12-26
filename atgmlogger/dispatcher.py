@@ -7,10 +7,17 @@ import threading
 from typing import Dict, Type
 from weakref import WeakSet
 
-from .runconfig import rcParams
+from .gpio import GPIOWorker
 from .logger import DataLogger
-from .plugins import PluginInterface, PluginDaemon
-from .types import Command, CommandSignals, DataLine
+from .runconfig import rcParams
+from .types import Blink, Command, CommandSignals
+try:
+    from atgmlogger_plugins import PluginInterface, PluginDaemon
+    HAS_PLUGINS = True
+except ImportError:
+    HAS_PLUGINS = False
+
+    pass
 
 LOG = logging.getLogger(__name__)
 POLL_INTV = 1
@@ -52,6 +59,7 @@ class Dispatcher(threading.Thread):
     def register(cls, klass, **params):
         cls.acquire_lock()
         assert klass is not None
+        assert HAS_PLUGINS
         if issubclass(klass, PluginInterface) and klass not in cls._plugins:
             LOG.debug("Registering class {} in dispatcher as regular"
                       "plugin.".format(klass))
@@ -81,12 +89,20 @@ class Dispatcher(threading.Thread):
 
     def run(self):
         self.acquire_lock(blocking=True)
-        LOG.debug("Dispatcher run acquired runlock")
+        LOG.debug("Dispatcher started and acquired runlock")
 
         # Instantiate logger thread
         logger = DataLogger(rcParams['logging.logdir'], self._context)
         logger.start()
         self._threads.add(logger)
+
+        # Attempt to instantiate GPIO thread
+        try:
+            gpio = GPIOWorker()
+            gpio.start()
+            self._threads.add(gpio)
+        except RuntimeError:
+            gpio = None
 
         # Create plugin threads
         plugin_type_map = {}
@@ -96,11 +112,12 @@ class Dispatcher(threading.Thread):
                 instance.set_context(self._context)
                 instance.configure(**self._params[plugin])
             except (TypeError, ValueError, AttributeError, RuntimeError):
-                LOG.exception("Error instantiating listener.")
+                LOG.exception("Error instantiating plugin %s.",
+                              str(plugin.__name__))
                 continue
             else:
-                ctypes = instance.consumer_type()
-                for ctype in ctypes:
+                consumer_types = instance.consumer_type()
+                for ctype in consumer_types:
                     consumer_set = plugin_type_map.setdefault(ctype, WeakSet())
                     consumer_set.add(instance)
 
@@ -117,6 +134,9 @@ class Dispatcher(threading.Thread):
                 logger.log(item)
                 for subscriber in plugin_type_map.get(type(item), set()):
                     subscriber.put(item)
+                if isinstance(item, Command) and gpio is not None:
+                    gpio.send(item)
+
                 self._queue.task_done()
 
             # Check if a daemon needs to be spawned
@@ -155,18 +175,6 @@ class Dispatcher(threading.Thread):
     def signal(self, signal=CommandSignals.SIGHUP):
         """Notify threads of a system signal or user defined event."""
         self.put(Command(signal))
-
-
-class Blink:
-    def __init__(self, led, priority=5, frequency=0.1, continuous=False):
-        self.led = led
-        self.priority = priority
-        self.frequency = frequency
-        self.duration = 0
-        self.until_stopped = continuous
-
-    def __lt__(self, other):
-        return self.priority < other.priority
 
 
 class AppContext:

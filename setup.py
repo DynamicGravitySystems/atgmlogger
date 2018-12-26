@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # setup.py for atgmlogger
 #
-# (C) 2016-2018 Zachery P. Brady
+# (C) 2016-2019 Zachery P. Brady
 
 
 from setuptools import setup
@@ -16,8 +16,7 @@ requirements = [
 setup(
     name='atgmlogger',
     version=__version__,
-    packages=['atgmlogger', 'atgmlogger.plugins', 'atgmlogger.tests',
-              'atgmlogger.tests.plugins'],
+    packages=['atgmlogger', 'atgmlogger.tests'],
     url='https://github.com/bradyzp/atgmlogger',
     license='',
     author='Zachery Brady',

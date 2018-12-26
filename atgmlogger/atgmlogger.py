@@ -14,14 +14,16 @@ import itertools
 import logging.config
 import signal
 import threading
-from pathlib import Path
 
 import serial
+try:
+    from atgmlogger_plugins import load_plugin
+except ImportError:
+    load_plugin = None
 
 from . import POSIX
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
-from .plugins import load_plugin
 from .types import DataLine
 
 LOG = logging.getLogger('atgmlogger.main')
@@ -133,9 +135,14 @@ class SerialListener:
 def _init_dispatcher(collector: queue.Queue, plugins=None, verbosity=0):
     """Loads plugin(s) and returns initialized Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
+    if load_plugin is None:
+        LOG.warning("atgmlogger-plugins are unavailable. Consult the "
+                    "documentation for how to install the plugin package.")
+        return dispatcher
 
     for plugin in plugins or []:
         try:
+            # noinspection PyCallingNonCallable
             klass = load_plugin(plugin)
             dispatcher.register(klass, **plugins[plugin])
             LOG.info("Loaded plugin: %s", plugin)

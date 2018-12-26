@@ -15,7 +15,9 @@ dist/
 # Unit Test Logs
 .pytest_cache/
 atgmlogger/tests/logs/
+scratch/*
 
 # Data files used for integration testing
 *.dat
+*.log
 

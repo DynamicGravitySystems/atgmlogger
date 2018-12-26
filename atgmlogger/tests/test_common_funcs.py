@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import os
 import sys
 import copy
 import datetime
 import logging
-from pathlib import Path
-import pytest
 
 from atgmlogger import atgmlogger
 from atgmlogger.runconfig import _ConfigParams
