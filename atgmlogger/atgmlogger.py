@@ -24,7 +24,7 @@ except ImportError:
 from . import POSIX
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
-from .types import DataLine
+from ._types import DataLine
 
 LOG = logging.getLogger('atgmlogger.main')
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))

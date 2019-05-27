@@ -72,6 +72,7 @@ class RunConfig(UserDict):
     def from_file(config_name='atgmlogger.json'):
         """Search for configuration from default filesystem locations"""
         _default_paths = [
+            Path('.'),
             Path('~/'),
             Path('/etc/atgmlogger'),
             Path('/opt/atgmlogger')

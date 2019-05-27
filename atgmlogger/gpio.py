@@ -5,7 +5,7 @@ import threading
 import time
 from queue import Queue
 
-from .types import Blink, Command
+from ._types import Blink, Command
 
 LOG = logging.getLogger(__name__)
 __all__ = ['GPIOWorker']

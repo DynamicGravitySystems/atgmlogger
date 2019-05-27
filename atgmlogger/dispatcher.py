@@ -10,7 +10,7 @@ from weakref import WeakSet
 from .gpio import GPIOWorker
 from .logger import DataLogger
 from .runconfig import rcParams
-from .types import Blink, Command, CommandSignals
+from ._types import Blink, Command, CommandSignals
 try:
     from atgmlogger_plugins import PluginInterface, PluginDaemon
     HAS_PLUGINS = True

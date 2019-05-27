@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from queue import Queue
 
-from .types import Command, CommandSignals, DataLine
+from ._types import Command, CommandSignals, DataLine
 
 __all__ = ['DataLogger']
 LOG = logging.getLogger(__name__)
