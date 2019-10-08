@@ -109,8 +109,6 @@ class Dispatcher(threading.Thread):
         daemons = {}  # Dict[daemon: instance of daemon]
         while not self.sigExit.is_set():
             self._tick += 1
-            # TODO: Enable polling of plugins even if no data is incoming
-            # e.g. USB copy should still run even when no input stream
             try:
                 item = self._queue.get(block=True, timeout=POLL_INTV)
             except queue.Empty:
@@ -189,7 +187,7 @@ class AppContext:
         cmd = Blink(led=led, frequency=freq)
         self._queue.put_nowait(cmd)
 
-    def blink_until(self, until: threading.Event=None, led='usb', freq=0.03):
+    def blink_until(self, until: threading.Event = None, led='usb', freq=0.03):
         # TODO: Possibly allow caller to pass event that the caller can set
         # to end the blink
         cmd = Blink(led=led, frequency=freq, continuous=True)

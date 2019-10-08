@@ -35,9 +35,6 @@ class DataLogger(PluginInterface):
         system.
         Flush, close then reopen the handle.
 
-        Returns
-        -------
-
         """
         LOG.info("LogRotate signal received, re-opening log handle.")
         if self._hdl is None:
@@ -78,7 +75,6 @@ class DataLogger(PluginInterface):
                     self.context.blink()
                     self.queue.task_done()
             except IOError:
-                LOG.exception()
                 continue
         self._hdl.close()
 

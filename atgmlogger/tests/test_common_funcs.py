@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 
-import os
-import sys
 import copy
 import datetime
 import logging
+import sys
 from pathlib import Path
+
 import pytest
 
 from atgmlogger import atgmlogger
-from atgmlogger.runconfig import _ConfigParams
 from atgmlogger.plugins import load_plugin
+from atgmlogger.runconfig import _ConfigParams
 
 _log = logging.getLogger(__name__)
 _log.setLevel(logging.DEBUG)
@@ -47,6 +47,7 @@ def test_convert_gps_time():
     expected = 1516484080.0
 
     from atgmlogger.plugins import timesync
+
     res = timesync.convert_gps_time(gpsweek, gpssec)
     assert expected == res
 
@@ -65,6 +66,7 @@ def test_timestamp_from_data():
                   '00000000005558'
 
     from atgmlogger.plugins import timesync
+
     res = timesync.timestamp_from_data(data_unsync)
     assert res is None
 
@@ -84,12 +86,14 @@ def test_timestamp_from_data():
 @pytest.mark.skip("Broken due to refactoring of parse_args into __main__.py")
 def test_parse_args():
     from atgmlogger.runconfig import rcParams
+
     cfg_path = Path('atgmlogger/install/.atgmlogger')
     with cfg_path.open('r') as fd:
         rcParams.load_config(fd)
     argv = ['atgmlogger.py', '-vvv', '-c', 'atgmlogger/install/.atgmlogger',
             '--logdir', '/var/log/atgmlogger']
     from atgmlogger.__main__ import parse_args
+
     args = parse_args(argv)
 
     assert args.verbose == 3
