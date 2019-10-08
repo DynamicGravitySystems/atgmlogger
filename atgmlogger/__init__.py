@@ -6,7 +6,7 @@ import logging
 __all__ = ['LOG_LVLMAP', 'LOG_FMT', 'DATE_FMT', 'POSIX',
            '__version__', '__description__']
 
-__version__ = '0.4.1-alpha.4'
+__version__ = '0.4.5'
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
 
 
