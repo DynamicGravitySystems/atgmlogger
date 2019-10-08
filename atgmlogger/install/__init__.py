@@ -82,7 +82,7 @@ def _install_logrotate_config(log_path=None):
     config = """
     {logpath}/*.log {{
         missingok
-        daily
+        weekly
         dateext
         dateyesterday
         dateformat .%Y-%m-%d
@@ -96,7 +96,6 @@ def _install_logrotate_config(log_path=None):
         dateyesterday
         dateformat .%Y-%m-%d
         rotate 30
-        compress
         {postrotate}
     }}
     """.format(logpath=str(log_path.resolve()), postrotate=postscript)
