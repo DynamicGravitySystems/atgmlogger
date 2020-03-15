@@ -1,1 +1,1 @@
-ACTION=="add", KERNEL=="sd?1", SUBSYSTEMS=="block", SYMLINK+="usbstick"
+ACTION=="add", KERNEL=="sd?1", SUBSYSTEMS=="block", SYMLINK+="usbstorage", TAG+="systemd", ENV{SYSTEMD_WANTS}="media-removable.mount"

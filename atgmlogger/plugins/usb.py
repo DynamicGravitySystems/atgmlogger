@@ -99,14 +99,14 @@ class RemovableStorageHandler(PluginDaemon):
 
     mountpath = Path('/media/removable')
     logdir = Path('/var/log/atgmlogger')
-    patterns = ['*.dat', '*.log', '*.gz']
+    patterns = ['*.dat', '*.log', '*.gz', '*.dat.*']
 
     @classmethod
     def condition(cls, *args):
         return os.path.ismount(str(cls.mountpath))
 
     def __init__(self, **kwargs):
-        LOG.debug("Initializing RSH")
+        LOG.debug("Initializing RemovableStorageHandler")
         super().__init__(**kwargs)
 
         self._current_path = None
