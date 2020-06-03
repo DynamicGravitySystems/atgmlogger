@@ -20,7 +20,6 @@ setup(
     packages=['atgmlogger', 'atgmlogger.plugins', 'atgmlogger.tests',
               'atgmlogger.tests.plugins'],
     url='https://github.com/bradyzp/atgmlogger',
-    license='',
     author='Zachery Brady',
     author_email='bradyzp@dynamicgravitysystems.com',
     description="Serial Data Recording Utility for Linux/RaspberryPi devices.",
