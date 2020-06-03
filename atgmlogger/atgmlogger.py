@@ -22,8 +22,10 @@ import serial
 from .runconfig import rcParams
 from .dispatcher import Dispatcher
 from .plugins import load_plugin
-from . import APPLOG, POSIX, LOG_FMT, DATE_FMT
+from . import POSIX, LOG_FMT, TRACE_LOG_FMT, DATE_FMT
 
+
+LOG = logging.getLogger('atgmlogger.main')
 ILLEGAL_CHARS = list(itertools.chain(range(0, 32), [255, 256]))
 
 
@@ -68,6 +70,9 @@ class SerialListener:
     def exiting(self) -> bool:
         return self.sigExit.is_set()
 
+    def __call__(self, *args, **kwargs):
+        return self.listen()
+
     def listen(self):
         """
         Listen endlessly for serial data on the specified port and add it
@@ -85,8 +90,8 @@ class SerialListener:
                 continue
             self._queue.put_nowait(data)
 
-        APPLOG.debug("Exiting listener.listen() method, and closing serial "
-                     "handle.")
+        LOG.debug("Exiting listener.listen() method, and closing serial "
+                  "handle.")
         self._handle.close()
 
     def readline(self):
@@ -126,31 +131,32 @@ class SerialListener:
         return decoded
 
 
-def _configure_applog():
+# TODO: Move some/all of this functionality into __main__ initialize function
+def _configure_applog(log_format):
     logdir = Path(rcParams['logging.logdir'])
     if not logdir.exists():
         try:
             logdir.mkdir(parents=True, mode=0o750)
         except (FileNotFoundError, OSError):
-            APPLOG.warning("Log directory could not be created, log "
-                           "files will be output to current directory (%s).",
-                           str(Path().resolve()))
+            LOG.warning("Log directory could not be created, log "
+                        "files will be output to current directory (%s).",
+                        str(Path().resolve()))
             logdir = Path()
 
     from logging.handlers import WatchedFileHandler
 
     applog_hdlr = WatchedFileHandler(str(logdir.joinpath('application.log')),
                                      encoding='utf-8')
-    applog_hdlr.setFormatter(logging.Formatter(LOG_FMT, datefmt=DATE_FMT))
-    APPLOG.addHandler(applog_hdlr)
-    APPLOG.debug("Application log configured, log path: %s", str(logdir))
+    applog_hdlr.setFormatter(logging.Formatter(log_format, datefmt=DATE_FMT))
+    LOG.addHandler(applog_hdlr)
+    LOG.debug("Application log configured, log path: %s", str(logdir))
 
 
 def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
     """Loads plugin and returns instance of Dispatcher"""
     dispatcher = Dispatcher(collector=collector)
 
-    # Explicitly register the DataLogger 'plugin'
+    # Explicitly import and register the DataLogger 'plugin'
     from .logger import DataLogger
 
     logfile = Path(rcParams['logging.logdir']).joinpath('gravdata.dat')
@@ -161,12 +167,12 @@ def _get_dispatcher(collector=None, plugins=None, verbosity=0, exclude=None):
         for plugin in plugins:
             try:
                 load_plugin(plugin, register=True, **plugins[plugin])
-                APPLOG.info("Loaded plugin: %s", plugin)
-            except ImportError:  # ModuleNotFoundError implemented in 3.6
+                LOG.info("Loaded plugin: %s", plugin)
+            except ImportError:  # ModuleNotFoundError not implemented until py3.6
                 if verbosity is not None and verbosity >= 2:
-                    APPLOG.exception("Plugin <%s> could not be loaded.", plugin)
+                    LOG.exception("Plugin <%s> could not be loaded. Continuing.", plugin)
                 else:
-                    APPLOG.warning("Plugin <%s> could not be loaded.", plugin)
+                    LOG.warning("Plugin <%s> could not be loaded. Continuing.", plugin)
     return dispatcher
 
 
@@ -182,23 +188,30 @@ def _get_handle():
 
 def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     """
+    Main execution method, expects args passed from a Namespace created
+    by an argparse class.
+    listener, handle, and dispatcher can optionally be injected as dependencies,
+    otherwise standard instances will be created via rcParams options and args.
 
     Parameters
     ----------
     args : Namespace
         Namespace containing parsed commandline arguments.
-    listener
-    handle
-    dispatcher
-
-    Returns
-    -------
+    listener : SerialListener
+        Callable function/class with exit method
+    handle : serial.Serial
+        PySerial Serial object for Serial IO
+    dispatcher : Dispatcher
 
     """
     # Init Performance Counter
     t_start = time.perf_counter()
 
-    _configure_applog()
+    # TODO: Again candidate to move into __main__::initialize
+    fmt = LOG_FMT
+    if args.trace:
+        fmt = TRACE_LOG_FMT
+    _configure_applog(fmt)
 
     if listener is None:
         listener = SerialListener(handle or _get_handle())
@@ -208,21 +221,19 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     # End Init Performance Counter
     t_end = time.perf_counter()
     if args.verbose:
-        APPLOG.info("ATGMLogger started. Initialization time: %.4f", t_end -
-                    t_start)
-
+        LOG.info("ATGMLogger started. Initialization time: %.4f", t_end - t_start)
     try:
         if POSIX:
             # Listen for SIGHUP to tell logger that files have been rotated.
             # Note: Signal handler must be defined in main thread
-            signal.signal(signal.SIGHUP,
-                          lambda sig, frame: dispatcher.log_rotate())
+            signal.signal(signal.SIGHUP, lambda sig, frame: dispatcher.log_rotate())
         dispatcher.start()
-        listener.listen()
+        # print(logging.Logger.manager.loggerDict.keys())
+        listener()
     except KeyboardInterrupt:
-        APPLOG.info("Keyboard Interrupt intercepted, initiating clean exit.")
+        LOG.info("Keyboard Interrupt intercepted, cleaning up and exiting.")
         listener.exit()
         dispatcher.exit(join=False)
-        APPLOG.debug("Dispatcher exited.")
+        LOG.debug("Dispatcher exited.")
 
     return 0

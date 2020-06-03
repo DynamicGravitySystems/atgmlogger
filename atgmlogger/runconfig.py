@@ -3,20 +3,20 @@
 
 import copy
 import json
+import logging
 from io import TextIOWrapper
 from pathlib import Path
 from typing import Dict
 
-from . import APPLOG
 
 __all__ = ['rcParams']
-
 _base = __name__.split('.')[0]
+LOG = logging.getLogger(__name__)
 
 
 class _ConfigParams:
     """Centralize the loading and dissemination of configuration parameters"""
-    cfg_name = '.atgmlogger'
+    cfg_name = 'atgmlogger.json'
     cfg_paths = [Path('~').expanduser().joinpath(cfg_name),
                  Path('/etc/atgmlogger').joinpath(cfg_name),
                  Path('/opt/atgmlogger').joinpath(cfg_name)]
@@ -35,39 +35,37 @@ class _ConfigParams:
                     with cfg.open('r') as fd:
                         self.load_config(fd)
                     if self._default:
-                        APPLOG.info("Loaded configuration from: %s",
-                                    str(self._path))
+                        LOG.info("Loaded configuration from: %s",
+                                 str(self._path))
                         break
             else:
-                APPLOG.warning("No configuration file could be located, "
-                               "attempting to load default.")
-                APPLOG.warning("Execute with --install option to install "
-                               "default configuration files.")
+                LOG.warning("No configuration file could be located, "
+                            "attempting to load default.")
+                LOG.warning("Execute with --install option to install "
+                            "default configuration files.")
                 try:
                     import pkg_resources as pkg
                     rawfd = pkg.resource_stream(_base + '.install',
-                                                '.atgmlogger')
+                                                self.cfg_name)
                     text_wrapper = TextIOWrapper(rawfd, encoding='utf-8')
 
                     self.load_config(text_wrapper)
                 except IOError:
-                    APPLOG.exception("Error loading default configuration.")
+                    LOG.exception("Error loading default configuration.")
                 else:
-                    APPLOG.info("Successfully loaded default configuration.")
+                    LOG.info("Successfully loaded default configuration.")
 
     def load_config(self, descriptor):
-        # TODO: Add error action, if we already have config don't mutate it
-        # on fail
         try:
             cfg = json.load(descriptor)
         except json.JSONDecodeError:
-            APPLOG.exception("JSON Exception decoding: %s", descriptor.name)
+            LOG.exception("JSON Exception decoding: %s", descriptor.name)
             cfg = self._default
         self._path = Path(descriptor.name)
         self._default = cfg
         self._working = copy.deepcopy(cfg)
         if cfg:
-            APPLOG.info("Loaded Configuration from %s", str(self._path))
+            LOG.info("Loaded Configuration from %s", str(self._path))
 
     def get_default(self, key):
         base = self._default
@@ -76,7 +74,6 @@ class _ConfigParams:
         return base or None
 
     def dump(self, path: Path=None, overrides=False, exist_ok=False):
-        # TODO: Implement backup of config when path exists.
         path = path or self.path
         if not exist_ok and path.exists():
             raise FileExistsError("Destination configuration already exists. "
@@ -86,11 +83,11 @@ class _ConfigParams:
         else:
             cfg = self._default
         try:
-            APPLOG.info("Writing current configuration to %s", str(path))
+            LOG.info("Writing current configuration to %s", str(path))
             with path.open('w+') as fd:
                 json.dump(cfg, fd, indent=2)
         except (IOError, OSError):
-            APPLOG.exception()
+            LOG.exception("Exception attempting to save configuration to disk.")
 
     @property
     def config(self):
@@ -115,7 +112,6 @@ class _ConfigParams:
         path = key.split('.')
         last = path.pop()
 
-        # TODO: Allow creation of new paths or not?
         for part in path:
             base = base.setdefault(part, {})
         base[last] = value

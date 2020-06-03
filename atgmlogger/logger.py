@@ -2,13 +2,14 @@
 # This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
 
 import io
+import logging
 from pathlib import Path
 
-from atgmlogger import APPLOG
 from .plugins import PluginInterface
 from .dispatcher import Command
 
 __all__ = ['DataLogger']
+LOG = logging.getLogger(__name__)
 
 
 class DataLogger(PluginInterface):
@@ -34,11 +35,8 @@ class DataLogger(PluginInterface):
         system.
         Flush, close then reopen the handle.
 
-        Returns
-        -------
-
         """
-        APPLOG.info("LogRotate signal received, re-opening log handle.")
+        LOG.info("LogRotate signal received, re-opening log handle.")
         if self._hdl is None:
             return
 
@@ -47,22 +45,22 @@ class DataLogger(PluginInterface):
             self._hdl.close()
             self._hdl = None
         except IOError:
-            APPLOG.exception()
+            LOG.exception("IOError encountered rotating log file.")
             return
 
         self._get_fhandle()
-        APPLOG.debug("LogRotate completed without exception, handle opened "
-                     "on path %s", self._hdl.name)
+        LOG.debug("LogRotate completed without exception, handle opened "
+                  "on path %s", self._hdl.name)
 
     def run(self):
         try:
             self._get_fhandle()
         except IOError:
-            APPLOG.exception("Error opening file for writing.")
+            LOG.exception("Error opening file for writing.")
             return
 
-        # TODO: Maybe sample first 5 lines of data, find the mode (freq) of
-        # data transmission to set Blink frequency
+        # TODO: Take sample of data, find the mode (freq) of
+        # transmission to set Blink frequency
         while not self.exiting:
             try:
                 item = self.get(block=True, timeout=None)
@@ -77,7 +75,6 @@ class DataLogger(PluginInterface):
                     self.context.blink()
                     self.queue.task_done()
             except IOError:
-                APPLOG.exception()
                 continue
         self._hdl.close()
 

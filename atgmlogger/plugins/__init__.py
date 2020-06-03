@@ -3,12 +3,12 @@
 
 import abc
 import queue
+import logging
 import threading
 from importlib import import_module
 
-from .. import APPLOG
-
 __all__ = ['PluginInterface', 'PluginDaemon', 'load_plugin']
+LOG = logging.getLogger(__name__)
 
 
 class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
@@ -47,7 +47,7 @@ class PluginInterface(threading.Thread, metaclass=abc.ABCMeta):
         return self._context
 
     def configure(self, **options):
-        APPLOG.debug("Configuring Plugin: {} with options: {}".format(
+        LOG.debug("Configuring Plugin: {} with options: {}".format(
             self.__class__.__name__, options))
         for key, value in options.items():
             lkey = str(key).lower()
@@ -202,13 +202,11 @@ def load_plugin(name, path=None, register=True, **plugin_params):
     try:
         klass = getattr(plugin, '__plugin__')
     except AttributeError:
-        raise ImportError("__plugin__ is not defined in plugin module %s." %
-                          name)
+        raise ImportError("__plugin__ is not defined in plugin module %s." % name)
     if isinstance(klass, str):
         klass = getattr(plugin, klass)
     if klass is None:
         raise ImportError("__plugin__ is None in plugin module %s." % name)
-    # TODO: fix checks/casting of daemon
     if not issubclass(klass, PluginInterface) and not issubclass(klass, PluginDaemon):
         klass = type(name, (klass, PluginInterface), {})
     if register:

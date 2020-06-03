@@ -4,13 +4,15 @@
 import shlex
 import time
 import datetime
+import logging
 import subprocess
 from typing import Union
 
 from . import PluginDaemon
-from .. import APPLOG, POSIX
+from .. import POSIX
 
 __plugin__ = 'TimeSyncDaemon'
+LOG = logging.getLogger(__name__)
 
 
 def convert_gps_time(gpsweek: int, gpsweekseconds: float) -> float:
@@ -102,7 +104,7 @@ def set_system_time(timestamp):
         output = subprocess.check_output(shlex.split(cmd)).decode('utf-8')
         return output
     else:
-        APPLOG.info("set_system_time not supported on this platform.")
+        LOG.info("set_system_time not supported on this platform.")
         return None
 
 
@@ -119,9 +121,13 @@ class TimeSyncDaemon(PluginDaemon):
         cls._tick += 1
         return cls._tick % cls.interval == 0
 
+    @classmethod
+    def reset_tick(cls):
+        cls._tick = 0
+
     def _valid_time(self, timestamp):
         if not self.timetravel and timestamp > time.time():
-            APPLOG.debug("Timestamp is valid, {ts} > {now}".format(
+            LOG.debug("Timestamp is valid, {ts} > {now}".format(
                 ts=timestamp, now=time.time()))
             return True
         else:
@@ -130,17 +136,13 @@ class TimeSyncDaemon(PluginDaemon):
     def run(self):
         if not self.data:
             raise ValueError("TimeSyncDaemon has no data set.")
-
         try:
+            self.reset_tick()
             ts = timestamp_from_data(self.data)
             if ts is not None and self._valid_time(ts):
-                # APPLOG.debug("Attempting to set system time with timestamp: "
-                #              "%.2f", ts)
                 set_system_time(ts)
             else:
                 pass
-                # APPLOG.debug("None or invalid timestamp extracted from data.")
         except ValueError:
             pass
 
-        # APPLOG.debug("TimeSyncDaemon exiting.")

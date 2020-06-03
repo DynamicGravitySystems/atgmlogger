@@ -16,16 +16,16 @@ __all__ = ['install', 'uninstall']
 BASEPKG = __name__.split('.')[0]
 PREFIX = ''
 
-_log = logging.getLogger(__name__)
-_log.propagate = True
-_log.setLevel(logging.WARNING)
+LOG = logging.getLogger(__name__)
+# LOG.propagate = True
+LOG.setLevel(logging.WARNING)
 if POSIX:
     _install_log_path = 'install.log'
 else:
     _install_log_path = 'install.log'
 
-_log.addHandler(logging.FileHandler(_install_log_path,
-                                    encoding='utf-8'))
+LOG.addHandler(logging.FileHandler(_install_log_path,
+                                   encoding='utf-8'))
 
 
 _file_map = {
@@ -44,19 +44,19 @@ def write_bytes(path: str, bytearr, mode=0o644):
         os.write(fd, bytearr)
         os.close(fd)
     except OSError:
-        _log.exception("Exception writing template to file: %s", str(path))
+        LOG.exception("Exception writing template to file: %s", str(path))
 
 
 def sys_command(cmd, verbose=True):
     try:
         if verbose:
-            _log.info("Executing system command: '%s'", cmd)
+            LOG.info("Executing system command: '%s'", cmd)
         return subprocess.check_output(shlex.split(cmd))
     except (OSError, subprocess.SubprocessError, subprocess.CalledProcessError):
         if verbose:
-            _log.exception("Exception encountered executing command: '%s'", cmd)
+            LOG.exception("Exception encountered executing command: '%s'", cmd)
         else:
-            _log.warning("Exception encountered executing command: '%s'", cmd)
+            LOG.warning("Exception encountered executing command: '%s'", cmd)
         return -1
 
 
@@ -82,7 +82,7 @@ def _install_logrotate_config(log_path=None):
     config = """
     {logpath}/*.log {{
         missingok
-        daily
+        weekly
         dateext
         dateyesterday
         dateformat .%Y-%m-%d
@@ -96,44 +96,61 @@ def _install_logrotate_config(log_path=None):
         dateyesterday
         dateformat .%Y-%m-%d
         rotate 30
-        compress
         {postrotate}
     }}
     """.format(logpath=str(log_path.resolve()), postrotate=postscript)
     try:
-        _log.info("Installing logrotate configuration in %s", str(dest_path))
+        LOG.info("Installing logrotate configuration in %s", str(dest_path))
         fd = os.open(str(dest_path), os.O_WRONLY | os.O_CREAT, mode=0o640)
         hdl = os.fdopen(fd, mode='w')
         hdl.write(dedent(config))
     except IOError:
-        _log.exception("Exception creating atgmlogger logrotate config.")
+        LOG.exception("Exception creating atgmlogger logrotate config.")
 
 
-# TODO: What about checking/updating /boot/cmdline.txt and adding
-# enable_uart=1 to /boot/config.txt?
-# Use sed to keep it simple? yes probably.
+def configure_rpi():
+    """Check/set parameters in /boot/config.txt and /boot/cmdline.txt to
+    configure Raspberry Pi for GPIO serial IO.
+    Specifically this requires adding `enable_uart=1` to the end of config.txt
+    and removing a clause from the cmdline.txt file to disable TTY over the GPIO
+    serial interface."""
+
+    sys_command("sed -i -r 's/console=serial0,115200 //' /boot/cmdline.txt")
+
+    try:
+        with open('/boot/config.txt', 'r') as fd:
+            if 'enable_uart=1' in fd.read():
+                LOG.info("enable_uart is already set in config.txt, no action taken.")
+                return
+        with open('/boot/config.txt', 'a') as fd:
+            fd.write("enable_uart=1\n")
+            LOG.critical("enable_uart set, system reboot required for configuration to take effect.")
+    except (IOError, OSError):
+        LOG.exception("Error reading/writing from /boot/config.txt")
+
+
 def install(verbose=True):
     if verbose:
-        _log.setLevel(logging.DEBUG)
+        LOG.setLevel(logging.DEBUG)
     if not POSIX:
-        _log.warning("Invalid system platform for installation.")
+        LOG.warning("Invalid system platform for installation.")
         return 1
 
     df_mode = 0o640
     for src, dest in _file_map.items():
-        _log.info("Installing source file: %s to %s", src, dest)
+        LOG.info("Installing source file: %s to %s", src, dest)
         parent = os.path.split(dest)[0]
         if not os.path.exists(parent):
             try:
                 os.mkdir(parent, df_mode)
             except OSError:
-                _log.exception("Error creating directory: %s" % parent)
+                LOG.exception("Error creating directory: %s" % parent)
                 continue
         try:
             src_bytes = pkg_resources.resource_string(__name__, src)
             write_bytes(dest, src_bytes, df_mode)
         except (FileNotFoundError, OSError):
-            _log.exception("Error writing resource to dest file.")
+            LOG.exception("Error writing resource to dest file.")
     _install_logrotate_config()
 
     # Try to install dependencies for USB removable storage formats
@@ -143,26 +160,27 @@ def install(verbose=True):
     sys_command('systemctl daemon-reload')
     sys_command('systemctl enable media-removable.mount')
     sys_command('systemctl enable atgmlogger.service')
-    _log.critical("Installation of atgmlogger completed successfully.")
+    configure_rpi()
+    LOG.critical("Installation of atgmlogger completed successfully.")
     return 0
 
 
 def uninstall(verbose=True):
     if verbose:
-        _log.setLevel(logging.DEBUG)
-    _log.info("Stopping and disabling services.")
+        LOG.setLevel(logging.DEBUG)
+    LOG.info("Stopping and disabling services.")
     sys_command('systemctl stop atgmlogger.service')
     sys_command('systemctl disable media-removable.mount')
     sys_command('systemctl disable atgmlogger.service')
 
     for src, dest in _file_map.items():
         try:
-            _log.info("Removing file: %s", dest)
+            LOG.info("Removing file: %s", dest)
             os.remove(dest)
         except (IOError, OSError):
             if verbose:
-                _log.exception("Unable to remove installed file: %s", dest)
+                LOG.exception("Unable to remove installed file: %s", dest)
             else:
-                _log.warning("Unable to remove installed file: %s", dest)
-    _log.info("Successfully completed uninstall.")
+                LOG.warning("Unable to remove installed file: %s", dest)
+    LOG.info("Successfully completed uninstall.")
     return 0

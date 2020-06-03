@@ -10,7 +10,7 @@ from atgmlogger.runconfig import _ConfigParams
 from atgmlogger.dispatcher import Dispatcher
 
 
-@pytest.fixture(scope="module", params=["atgmlogger/install/.atgmlogger"])
+@pytest.fixture(scope="module", params=["atgmlogger/install/atgmlogger.json"])
 def cfg_dict(request):
     with open(request.param, 'r') as fd:
         config = json.load(fd)
@@ -19,7 +19,7 @@ def cfg_dict(request):
 
 @pytest.fixture
 def rcParams():
-    return _ConfigParams(path='atgmlogger/install/.atgmlogger')
+    return _ConfigParams(path='atgmlogger/install/atgmlogger.json')
 
 
 @pytest.fixture()

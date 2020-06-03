@@ -24,7 +24,7 @@
     "usb": {
         "mountpath": "/media/removable",
         "logdir": "/var/log/atgmlogger",
-        "patterns": ["*.dat", "*.log", "*.gz"]
+        "patterns": ["*.dat", "*.log", "*.gz", "*.dat.*"]
     },
     "timesync": {
         "interval": 1000
