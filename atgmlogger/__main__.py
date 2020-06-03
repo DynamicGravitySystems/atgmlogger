@@ -1,9 +1,9 @@
 #! /usr/bin/python3
 # -*- encoding: utf-8 -*-
 
-import sys
-import logging
 import argparse
+import logging
+import sys
 from pathlib import Path
 
 from . import __description__, __version__, LOG_LVLMAP
@@ -28,19 +28,16 @@ def parse_args(argv=None):
     parser.add_argument('--trace', action='store_true',
                         help="Enable detailed trace info in log messages.")
 
-    # Sub-Parser Groups
-    sub_parsers = parser.add_subparsers(dest='command', help="Subcommands to run/install/uninstall ATGMLogger")
-
-    run_parser = sub_parsers.add_parser('run', help='Run atgmlogger')
-    run_parser.add_argument('-d', '--device', action='store',
+    # Runtime options
+    parser.add_argument('-d', '--device', action='store',
                             help="Serial device path")
-    run_parser.add_argument('-l', '--logdir', action='store')
-    run_parser.add_argument('-m', '--mountdir', action='store',
+    parser.add_argument('-l', '--logdir', action='store')
+    parser.add_argument('-m', '--mountdir', action='store',
                             help="Specify custom USB Storage mount path. "
                                  "Overrides path configured in configuration.")
-    run_parser.add_argument('-c', '--config', action='store',
+    parser.add_argument('-c', '--config', action='store',
                             help="Specify path to custom JSON configuration.")
-    run_parser.add_argument('--nogpio', action='store_true',
+    parser.add_argument('--nogpio', action='store_true',
                             help="Disable GPIO output (LED notifications).")
 
     return parser.parse_args(args)
@@ -81,3 +78,7 @@ def entry_point():
     from .atgmlogger import atgmlogger
 
     sys.exit(atgmlogger(args))
+
+
+if __name__ == "__main__":
+    entry_point()
