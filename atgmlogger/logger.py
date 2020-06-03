@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# This file is part of ATGMLogger https://github.com/bradyzp/atgmlogger
+# This file is part of ATGMLogger https://github.com/DynamicGravitySystems/atgmlogger
 
 import io
 import logging
@@ -59,8 +59,6 @@ class DataLogger(PluginInterface):
             LOG.exception("Error opening file for writing.")
             return
 
-        # TODO: Take sample of data, find the mode (freq) of
-        # transmission to set Blink frequency
         while not self.exiting:
             try:
                 item = self.get(block=True, timeout=None)

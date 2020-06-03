@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # setup.py for atgmlogger
 #
-# (C) 2016-2018 Zachery P. Brady
+# (C) 2016-2020 Zachery P. Brady
+# (C) 2016-2020 Dynamic Gravity Systems
 
 
 from setuptools import setup
@@ -9,8 +10,8 @@ from atgmlogger import __version__, __description__
 
 requirements = [
     'setuptools >= 38.5.1',
-    'pyserial >= 3.3',
-    'RPi.GPIO >= 0.6.3'
+    'pyserial == 3.4',
+    'RPi.GPIO == 0.7.0'
 ]
 
 setup(
@@ -36,7 +37,7 @@ setup(
     setup_requires=['pytest-runner'],
     tests_require=['pytest'],
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Environment :: Console',
         'Environment :: No Input/Output (Daemon)',
         'License :: OSI Approved :: MIT License',
@@ -45,6 +46,8 @@ setup(
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: Implementation :: CPython',
         'Topic :: Scientific/Engineering :: GIS',
         'Topic :: Terminals :: Serial',

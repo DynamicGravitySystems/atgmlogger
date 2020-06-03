@@ -41,12 +41,9 @@ class _ConfigParams:
             else:
                 LOG.warning("No configuration file could be located, "
                             "attempting to load default.")
-                LOG.warning("Execute with --install option to install "
-                            "default configuration files.")
                 try:
                     import pkg_resources as pkg
-                    rawfd = pkg.resource_stream(_base + '.install',
-                                                self.cfg_name)
+                    rawfd = pkg.resource_stream(_base, self.cfg_name)
                     text_wrapper = TextIOWrapper(rawfd, encoding='utf-8')
 
                     self.load_config(text_wrapper)
