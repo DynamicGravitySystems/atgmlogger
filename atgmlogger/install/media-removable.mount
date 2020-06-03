@@ -1,0 +1,10 @@
+[Unit]
+Description=Mount usb storage removable device to /media/removable
+
+[Mount]
+What=/dev/usbstorage
+Where=/media/removable
+ForceUnmount=True
+
+[Install]
+WantedBy=multi-user.target

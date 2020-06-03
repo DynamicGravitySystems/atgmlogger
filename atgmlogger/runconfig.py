@@ -56,8 +56,6 @@ class _ConfigParams:
                     LOG.info("Successfully loaded default configuration.")
 
     def load_config(self, descriptor):
-        # TODO: Add error action, if we already have config don't mutate it
-        # on fail
         try:
             cfg = json.load(descriptor)
         except json.JSONDecodeError:
@@ -76,7 +74,6 @@ class _ConfigParams:
         return base or None
 
     def dump(self, path: Path=None, overrides=False, exist_ok=False):
-        # TODO: Implement backup of config when path exists.
         path = path or self.path
         if not exist_ok and path.exists():
             raise FileExistsError("Destination configuration already exists. "
