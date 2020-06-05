@@ -1,9 +1,9 @@
 #! /usr/bin/python3
 # -*- encoding: utf-8 -*-
 
-import sys
-import logging
 import argparse
+import logging
+import sys
 from pathlib import Path
 
 from . import __description__, __version__, LOG_LVLMAP
@@ -28,41 +28,18 @@ def parse_args(argv=None):
     parser.add_argument('--trace', action='store_true',
                         help="Enable detailed trace info in log messages.")
 
-    # Sub-Parser Groups
-    sub_parsers = parser.add_subparsers(dest='command', help="Subcommands to run/install/uninstall ATGMLogger")
-
-    install_parser = sub_parsers.add_parser('install', help='Install system files for ATGMLogger', allow_abbrev=True)
-    install_parser.add_argument('--service', action='store_true', default=True, help='Install ATGMLogger as a Systemd '
-                                                                                     'Service')
-    install_parser.add_argument('--dependencies', action='store_true', help='Install system dependencies using apt.')
-    install_parser.add_argument('--configure', action='store_true', help='Run RaspberryPi configuration scripts.')
-    install_parser.add_argument('--check-install', action='store_true', help='Verify installed components.')
-    install_parser.add_argument('--logrotate', action='store_true', default=True, help='Install logrotate '
-                                                                                       'configuration')
-    install_parser.add_argument('--with-mqtt', action='store_true', help='Install MQTT plugin configuration and AWS '
-                                                                         'IoT dependencies')
-
-    uninst_parser = sub_parsers.add_parser('uninstall', help='Uninstall ATGMLogger system files and configurations')
-    uninst_parser.add_argument('--keep-config', action='store_true', help='Retain configuration after uninstalling '
-                                                                          'ATGMLogger')
-
-    chkinst_parser = sub_parsers.add_parser('chkinstall', help="Check ATGMLogger installation and depdendencies")
-
-    run_parser = sub_parsers.add_parser('run', help='Run atgmlogger')
-    run_parser.add_argument('-d', '--device', action='store',
+    # Runtime options
+    parser.add_argument('-d', '--device', action='store',
                             help="Serial device path")
-    run_parser.add_argument('-l', '--logdir', action='store')
-    run_parser.add_argument('-m', '--mountdir', action='store',
+    parser.add_argument('-l', '--logdir', action='store')
+    parser.add_argument('-m', '--mountdir', action='store',
                             help="Specify custom USB Storage mount path. "
                                  "Overrides path configured in configuration.")
-    run_parser.add_argument('-c', '--config', action='store',
+    parser.add_argument('-c', '--config', action='store',
                             help="Specify path to custom JSON configuration.")
-    run_parser.add_argument('--nogpio', action='store_true',
+    parser.add_argument('--nogpio', action='store_true',
                             help="Disable GPIO output (LED notifications).")
 
-    # This fails if we specify global positional args before the command
-    # if args[0].lower() not in ['install', 'uninstall', 'run']:
-    #     args.insert(0, 'run')
     return parser.parse_args(args)
 
 
@@ -74,37 +51,6 @@ def initialize(args):
     else:
         log_level = LOG_LVLMAP.get(args.verbose, logging.INFO)
     LOG.setLevel(log_level)
-
-    if args.command in {'install', 'uninstall', 'chkinstall'}:
-        from . import install
-        method = getattr(install, args.command, None)
-        if method is None:
-            LOG.error("Command %s is not implemented", args.command)
-            sys.exit(1)
-        sys.exit(method(args))
-
-
-    # if args.command == 'install':
-    #     try:
-    #         from .install import install
-    #         sys.exit(install(args))
-    #     except (ImportError, OSError):
-    #         LOG.exception("Exception occurred trying to install system "
-    #                       "files.")
-    #         sys.exit(1)
-    # elif args.command == 'uninstall':
-    #     try:
-    #         from .install import uninstall
-    #         sys.exit(uninstall(args))
-    #     except (ImportError, OSError):
-    #         LOG.exception("Exception occurred uninstalling system files.")
-    # elif args.command == 'chkinstall':
-    #     try:
-    #         from .install import chkinstall
-    #         sys.exit(chkinstall(args))
-    #
-    #     except (ImportError, OSError):
-    #         pass
 
     # Set overrides from arguments
     from .runconfig import rcParams
@@ -132,3 +78,7 @@ def entry_point():
     from .atgmlogger import atgmlogger
 
     sys.exit(atgmlogger(args))
+
+
+if __name__ == "__main__":
+    entry_point()
