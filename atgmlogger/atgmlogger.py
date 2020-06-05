@@ -131,7 +131,6 @@ class SerialListener:
         return decoded
 
 
-# TODO: Move some/all of this functionality into __main__ initialize function
 def _configure_applog(log_format):
     logdir = Path(rcParams['logging.logdir'])
     if not logdir.exists():
@@ -207,11 +206,7 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
     # Init Performance Counter
     t_start = time.perf_counter()
 
-    # TODO: Again candidate to move into __main__::initialize
-    fmt = LOG_FMT
-    if args.trace:
-        fmt = TRACE_LOG_FMT
-    _configure_applog(fmt)
+    _configure_applog(TRACE_LOG_FMT if args.trace else LOG_FMT)
 
     if listener is None:
         listener = SerialListener(handle or _get_handle())
@@ -228,7 +223,6 @@ def atgmlogger(args, listener=None, handle=None, dispatcher=None):
             # Note: Signal handler must be defined in main thread
             signal.signal(signal.SIGHUP, lambda sig, frame: dispatcher.log_rotate())
         dispatcher.start()
-        # print(logging.Logger.manager.loggerDict.keys())
         listener()
     except KeyboardInterrupt:
         LOG.info("Keyboard Interrupt intercepted, cleaning up and exiting.")

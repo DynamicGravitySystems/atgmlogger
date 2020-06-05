@@ -1,25 +1,55 @@
 # -*- coding: utf-8 -*-
 
-import pytest
-import json
-import serial
 import threading
 from pathlib import Path
 
-from atgmlogger.runconfig import _ConfigParams
+import pytest
+import serial
+
 from atgmlogger.dispatcher import Dispatcher
+from atgmlogger.runconfig import _ConfigParams
 
 
-@pytest.fixture(scope="module", params=["atgmlogger/install/atgmlogger.json"])
-def cfg_dict(request):
-    with open(request.param, 'r') as fd:
-        config = json.load(fd)
-    return config
+@pytest.fixture(scope="module")
+def cfg_dict():
+    return {
+        "version": 0.4,
+        "serial": {
+            "port": "/dev/serial0",
+            "baudrate": 57600,
+            "bytesize": 8,
+            "parity": "N",
+            "stopbits": 1
+        },
+        "logging": {
+            "logdir": "/var/log/atgmlogger"
+        },
+        "usb": {
+            "mount": "/media/removable",
+            "copy_level": "debug"
+        },
+        "plugins": {
+            "gpio": {
+                "mode": "board",
+                "data_pin": 11,
+                "usb_pin": 13,
+                "freq": 0.04
+            },
+            "usb": {
+                "mountpath": "/media/removable",
+                "logdir": "/var/log/atgmlogger",
+                "patterns": ["*.dat", "*.log", "*.gz", "*.dat.*"]
+            },
+            "timesync": {
+                "interval": 1000
+            }
+        }
+    }
 
 
 @pytest.fixture
 def rcParams():
-    return _ConfigParams(path='atgmlogger/install/atgmlogger.json')
+    return _ConfigParams(path='atgmlogger/atgmlogger.json')
 
 
 @pytest.fixture()
@@ -37,6 +67,7 @@ def logger():
 
         def log(self, level, data):
             self.accumulator.append(data)
+
     return CustomLogger()
 
 
@@ -65,5 +96,3 @@ def logpath(request):
 def mountpoint(tmpdir):
     path = tmpdir.mkdir('mount')
     return Path(str(path))
-
-

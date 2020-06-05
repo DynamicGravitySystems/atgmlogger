@@ -3,12 +3,10 @@
 import sys
 import logging
 
-__all__ = ['LOG_LVLMAP', 'LOG_FMT', 'DATE_FMT', 'POSIX',
-           '__version__', '__description__']
+__all__ = ['LOG_LVLMAP', 'LOG_FMT', 'DATE_FMT', 'POSIX', '__version__', '__description__']
 
-__version__ = '0.4.5'
+__version__ = '0.6.0'
 __description__ = "Advanced Technology Gravity Meter - Serial Data Logger"
-
 
 LOG_LVLMAP = {0: logging.CRITICAL,
               1: logging.ERROR,
@@ -18,6 +16,8 @@ LOG_LVLMAP = {0: logging.CRITICAL,
 # Application level root logger - all other loggers should branch from this
 APPLOG = logging.getLogger('atgmlogger')
 LOG_FMT = "%(levelname)8s::%(asctime)s - (%(funcName)s) %(message)s"
+TRACE_LOG_FMT = "%(levelname)8s::%(asctime)s - (%(name)s/%(funcName)s:%(lineno)d " \
+                "- thread: %(threadName)s) %(message)s"
 DATE_FMT = "%Y-%m-%d::%H:%M:%S"
 _stderr_hdlr = logging.StreamHandler(sys.stderr)
 _stderr_hdlr.setFormatter(logging.Formatter(LOG_FMT,
