@@ -35,3 +35,15 @@ Dynamic Gravity Systems - Serial Data Recorder v0.6.0
         ```commandline
         /usr/bin/python3 -m atgmlogger -vvv
         ```
+
+---
+
+Building the Release:
+
+```shell
+venv/scripts/activate
+pip install -r requirements.txt
+pip install wheel setuptools
+
+python setup.py bdist_wheel
+```

@@ -228,11 +228,11 @@ class RemovableStorageHandler(PluginDaemon):
     @_filehook(r'clear(\.txt)?')
     def clear_logs(self, match):
         LOG.info("Clearing old application logs and gravity data files.")
-        for file in self.logdir.iterdir():  # type: Path
-            if file.is_file() and file.suffix in ['.gz']:
-                LOG.warning("Deleting archived file: %s", file.name)
+        for path in self.logdir.glob("*.dat.*"):  # type: Path
+            if path.is_file():
+                LOG.warning("Deleting file: %s", path.name)
                 try:
-                    os.remove(str(file.resolve()))
+                    os.remove(str(path.resolve()))
                 except OSError:
                     LOG.exception("Error removing archived file.")
 
